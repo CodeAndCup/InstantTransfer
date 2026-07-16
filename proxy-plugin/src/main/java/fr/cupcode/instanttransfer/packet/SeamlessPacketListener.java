@@ -26,6 +26,8 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerJo
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenHorseWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerAbilities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective;
@@ -35,10 +37,13 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * The client-side half of the zero-screen switch (the Velocity core patch removes the config phase
@@ -173,6 +178,28 @@ public final class SeamlessPacketListener implements PacketListener {
                     state.ghostEffects().remove(key);
                 }
 
+            } else if (type == PacketType.Play.Server.PLAYER_INFO_REMOVE) {
+                // The client caches its OWN tab-list PlayerInfo object inside the player entity;
+                // without JoinGame/Respawn that entity — and the cache — live forever. If the
+                // entry is removed and re-added (Velocity clears the tab on every switch, the new
+                // backend re-adds), later gamemode updates land on the REPLACEMENT object while
+                // isSpectator()/isCreative() keep reading the stale one → spectator noclip breaks
+                // ("creative but invisible"). The own entry must survive the whole session.
+                WrapperPlayServerPlayerInfoRemove w = new WrapperPlayServerPlayerInfoRemove(event);
+                if (w.getProfileIds().contains(user.getUUID())) {
+                    List<UUID> others = new ArrayList<>(w.getProfileIds());
+                    others.remove(user.getUUID());
+                    if (others.isEmpty()) {
+                        event.setCancelled(true);
+                    } else {
+                        w.setProfileIds(others);
+                        event.markForReEncode(true);
+                    }
+                }
+
+            } else if (type == PacketType.Play.Server.PLAYER_INFO_UPDATE) {
+                onPlayerInfoUpdate(event, user, state);
+
             } else if (type == PacketType.Play.Server.SCOREBOARD_OBJECTIVE) {
                 WrapperPlayServerScoreboardObjective w = new WrapperPlayServerScoreboardObjective(event);
                 if (w.getMode() == WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE) {
@@ -303,6 +330,46 @@ public final class SeamlessPacketListener implements PacketListener {
         }
         if (windowId == state.ghostWindowId()) {
             state.ghostWindowId(-1);
+        }
+    }
+
+    /**
+     * Companion of the PLAYER_INFO_REMOVE filter above: the first ADD_PLAYER of the session (which
+     * really creates the client's own tab entry) passes untouched; every later re-add of the own
+     * UUID (one per switch) is downgraded to an in-place update of the surviving entry, so the
+     * object the player entity cached keeps receiving gamemode/latency/display updates.
+     */
+    private void onPlayerInfoUpdate(PacketSendEvent event, User user, SwitchState state) {
+        WrapperPlayServerPlayerInfoUpdate w = new WrapperPlayServerPlayerInfoUpdate(event);
+        if (!w.getActions().contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER)) {
+            return; // plain updates mutate the existing entry: exactly what we want
+        }
+        WrapperPlayServerPlayerInfoUpdate.PlayerInfo own = null;
+        for (WrapperPlayServerPlayerInfoUpdate.PlayerInfo entry : w.getEntries()) {
+            if (user.getUUID().equals(entry.getProfileId())) {
+                own = entry;
+                break;
+            }
+        }
+        if (own == null) {
+            return;
+        }
+        if (!state.ownTabEntryAdded()) {
+            state.markOwnTabEntryAdded(); // first login: the add must really create the entry
+            return;
+        }
+        if (w.getEntries().size() == 1) {
+            event.setCancelled(true);
+        } else {
+            List<WrapperPlayServerPlayerInfoUpdate.PlayerInfo> others = new ArrayList<>(w.getEntries());
+            others.remove(own);
+            w.setEntries(others);
+            event.markForReEncode(true);
+        }
+        EnumSet<WrapperPlayServerPlayerInfoUpdate.Action> updateActions = EnumSet.copyOf(w.getActions());
+        updateActions.remove(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER);
+        if (!updateActions.isEmpty()) {
+            sendSuppressed(user, state, new WrapperPlayServerPlayerInfoUpdate(updateActions, own));
         }
     }
 

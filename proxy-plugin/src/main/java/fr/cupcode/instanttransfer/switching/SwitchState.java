@@ -106,6 +106,17 @@ public final class SwitchState {
     private volatile boolean newServerTalking = true;
 
     /**
+     * True once the client received its OWN tab-list entry (first login's ADD_PLAYER). The client
+     * caches that PlayerInfo object inside the player entity, and without JoinGame/Respawn the
+     * entity — and its cache — live forever. A remove/re-add cycle (which Velocity + the new
+     * backend perform on every switch) would replace the map object while the entity keeps the
+     * stale one: gamemode updates then land on the new object and isSpectator()/isCreative()
+     * keep reading the old — spectator noclip breaks. So after the first add, the own entry is
+     * never removed and re-adds are downgraded to in-place updates.
+     */
+    private volatile boolean ownTabEntryAdded = false;
+
+    /**
      * True while WE are sending packets from inside the listener; the re-entrant
      * onPacketSend calls for those packets must be ignored (this is what caused the
      * infinite "hold timeout" recursion in the previous position-hold attempt).
@@ -149,6 +160,14 @@ public final class SwitchState {
 
     public void markNewServerTalking() {
         newServerTalking = true;
+    }
+
+    public boolean ownTabEntryAdded() {
+        return ownTabEntryAdded;
+    }
+
+    public void markOwnTabEntryAdded() {
+        ownTabEntryAdded = true;
     }
 
     public boolean guardActive() {

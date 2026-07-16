@@ -89,6 +89,7 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Old server's scoreboard objectives/teams | SCOREBOARD_OBJECTIVE/TEAMS tracking → REMOVE on release (dropping an objective also drops its scores + display slot; dropping a team drops memberships) | ✅ |
 | Ghost weather (old server's rain) | CHANGE_GAME_STATE weather tracking → END_RAINING + zeroed rain/thunder levels on release if the new server sent no weather | ✅ |
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |
+| Own tab-list entry (the client caches its PlayerInfo object inside the player entity; a remove/re-add cycle strands the cache → spectator noclip breaks, isSpectator/isCreative read a stale gamemode) | own-UUID filtered out of PLAYER_INFO_REMOVE + re-ADDs downgraded to in-place updates of the surviving entry | ✅ |
 | Different dimension between servers | — | ❌ unsupported (auto Respawn fallback to implement) |
 
 ## 6. Remaining work
