@@ -60,6 +60,11 @@ import java.util.Set;
  *       areas); a chunk key counts as "arrived" only if it is not still a ghost. Any CHUNK_DATA or
  *       SPAWN_ENTITY from the new server also un-ghosts its key/id, so cleanup never destroys new
  *       content.</li>
+ *   <li>The OLD server keeps sending packets between the ghost snapshot and the actual backend
+ *       swap (a rain ramp broadcasts RAIN_LEVEL_CHANGE every tick, a moving player still gets
+ *       chunks). Anything ADDING client state in that window must go INTO the ghosts, not clear
+ *       them; only traffic after the ids message ({@link SwitchState#oldServerTalking()} false)
+ *       is the new server's. Removals are safe from either side.</li>
  * </ul>
  */
 public final class SeamlessPacketListener implements PacketListener {
@@ -100,7 +105,11 @@ public final class SeamlessPacketListener implements PacketListener {
             if (type == PacketType.Play.Server.SPAWN_ENTITY) {
                 int id = new WrapperPlayServerSpawnEntity(event).getEntityId();
                 state.trackedEntities().add(id);
-                state.ghostEntities().remove(id); // new backend reused an old id: not a ghost anymore
+                if (state.oldServerTalking()) {
+                    state.ghostEntities().add(id); // late old-server spawn: one more ghost to clean
+                } else {
+                    state.ghostEntities().remove(id); // new backend reused an old id: not a ghost
+                }
 
             } else if (type == PacketType.Play.Server.DESTROY_ENTITIES) {
                 for (int id : new WrapperPlayServerDestroyEntities(event).getEntityIds()) {
@@ -120,7 +129,11 @@ public final class SeamlessPacketListener implements PacketListener {
                 int cz = w.getColumn().getZ();
                 long key = SwitchState.chunkKey(cx, cz);
                 state.loadedChunks().add(key);
-                state.ghostChunks().remove(key); // fresh data replaces any old-server chunk here
+                if (state.oldServerTalking()) {
+                    state.ghostChunks().add(key); // late old-server chunk: one more ghost to clean
+                } else {
+                    state.ghostChunks().remove(key); // fresh data replaces any old-server chunk here
+                }
                 if (state.guardActive() && state.teleportSeen() && state.targetChunkKnown()
                         && cx == state.targetChunkX() && cz == state.targetChunkZ()) {
                     release(user, state, "arrival chunk delivered");
@@ -132,6 +145,7 @@ public final class SeamlessPacketListener implements PacketListener {
                 // forward none); it defines the entity id the client keeps for its whole session.
                 int id = new WrapperPlayServerJoinGame(event).getEntityId();
                 state.entityIds(id, id);
+                state.markNewServerTalking(); // safety: patch disabled → vanilla switch path
 
             } else if (type == PacketType.Play.Server.ENTITY_EFFECT) {
                 // Runs after the remapper, so the id is client-space: self-effects only.
@@ -139,7 +153,11 @@ public final class SeamlessPacketListener implements PacketListener {
                 if (w.getEntityId() == state.clientEntityId() && w.getPotionType() != null) {
                     String key = w.getPotionType().getName().toString();
                     state.activeEffects().put(key, w.getPotionType());
-                    state.ghostEffects().remove(key); // the new server (re-)applied it: not a ghost
+                    if (state.oldServerTalking()) {
+                        state.ghostEffects().put(key, w.getPotionType()); // late old-server effect
+                    } else {
+                        state.ghostEffects().remove(key); // the new server (re-)applied it: not a ghost
+                    }
                 }
 
             } else if (type == PacketType.Play.Server.REMOVE_ENTITY_EFFECT) {
@@ -150,13 +168,40 @@ public final class SeamlessPacketListener implements PacketListener {
                     state.ghostEffects().remove(key);
                 }
 
+            } else if (type == PacketType.Play.Server.CHANGE_GAME_STATE) {
+                // Weather is entirely CHANGE_GAME_STATE-driven; any weather event from the NEW
+                // server makes it authoritative, so the ghost snapshot is dropped. But a ramping
+                // rain broadcasts RAIN_LEVEL_CHANGE every tick — those still come from the OLD
+                // server until the ids message, and must refresh the ghost instead of clearing it
+                // (otherwise a switch during a rain ramp leaves rain frozen at a partial level).
+                WrapperPlayServerChangeGameState w = new WrapperPlayServerChangeGameState(event);
+                WrapperPlayServerChangeGameState.Reason reason = w.getReason();
+                boolean weatherEvent = true;
+                if (reason == WrapperPlayServerChangeGameState.Reason.BEGIN_RAINING) {
+                    state.raining(true);
+                } else if (reason == WrapperPlayServerChangeGameState.Reason.END_RAINING) {
+                    state.clearWeather();
+                } else if (reason == WrapperPlayServerChangeGameState.Reason.RAIN_LEVEL_CHANGE) {
+                    state.rainLevel(w.getValue());
+                } else if (reason == WrapperPlayServerChangeGameState.Reason.THUNDER_LEVEL_CHANGE) {
+                    state.thunderLevel(w.getValue());
+                } else {
+                    weatherEvent = false;
+                }
+                if (weatherEvent) {
+                    state.ghostWeather(state.oldServerTalking() && state.weatherActive());
+                }
+
             } else if (type == PacketType.Play.Server.OPEN_WINDOW) {
-                state.openWindowId(new WrapperPlayServerOpenWindow(event).getContainerId());
-                state.ghostWindowId(-1); // the new GUI replaces whatever was open before
+                int windowId = new WrapperPlayServerOpenWindow(event).getContainerId();
+                state.openWindowId(windowId);
+                // A new-server GUI replaces whatever was open; a late old-server GUI IS the ghost.
+                state.ghostWindowId(state.oldServerTalking() ? windowId : -1);
 
             } else if (type == PacketType.Play.Server.OPEN_HORSE_WINDOW) {
-                state.openWindowId(new WrapperPlayServerOpenHorseWindow(event).getWindowId());
-                state.ghostWindowId(-1);
+                int windowId = new WrapperPlayServerOpenHorseWindow(event).getWindowId();
+                state.openWindowId(windowId);
+                state.ghostWindowId(state.oldServerTalking() ? windowId : -1);
 
             } else if (type == PacketType.Play.Server.CLOSE_WINDOW) {
                 state.openWindowId(-1);
@@ -314,6 +359,21 @@ public final class SeamlessPacketListener implements PacketListener {
         }
         ghostEffects.clear();
 
+        // Weather from the previous server the new one never countermanded (a non-raining server
+        // sends NO weather packet on join): stop it explicitly. END_RAINING alone only starts a
+        // slow client-side fade — zeroing both levels makes the sky clear instantly.
+        boolean ghostWeather = state.ghostWeather();
+        if (ghostWeather) {
+            sendSuppressed(user, state, new WrapperPlayServerChangeGameState(
+                    WrapperPlayServerChangeGameState.Reason.END_RAINING, 0));
+            sendSuppressed(user, state, new WrapperPlayServerChangeGameState(
+                    WrapperPlayServerChangeGameState.Reason.RAIN_LEVEL_CHANGE, 0));
+            sendSuppressed(user, state, new WrapperPlayServerChangeGameState(
+                    WrapperPlayServerChangeGameState.Reason.THUNDER_LEVEL_CHANGE, 0));
+            state.clearWeather();
+            state.ghostWeather(false);
+        }
+
         // A container GUI left open on the previous server: nothing else ever closes it (no
         // Respawn), and its window id means nothing to the new server — close it client-side.
         int ghostWindow = state.ghostWindowId();
@@ -326,8 +386,9 @@ public final class SeamlessPacketListener implements PacketListener {
         }
 
         logger.info("[InstantTransfer] seamless arrival for {} ({}): removed {} ghost entities, "
-                        + "{} ghost chunks, {} ghost effects{}",
+                        + "{} ghost chunks, {} ghost effects{}{}",
                 user.getName(), reason, entityCount, chunkCount, effectCount,
+                ghostWeather ? ", cleared ghost weather" : "",
                 ghostWindow != -1 ? ", closed ghost GUI #" + ghostWindow : "");
     }
 

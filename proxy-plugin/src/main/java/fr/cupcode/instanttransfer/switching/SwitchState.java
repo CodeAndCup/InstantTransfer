@@ -45,6 +45,17 @@ public final class SwitchState {
     private volatile int openWindowId = -1;
     private volatile int ghostWindowId = -1;
 
+    /**
+     * Weather the client currently displays (rain flag + gradual rain/thunder levels, all driven
+     * by CHANGE_GAME_STATE). A new server that is NOT raining sends no weather packet at all on
+     * join, so the old server's rain would keep falling forever — snapshot it as a ghost and
+     * clear it on arrival unless the new server sent any weather of its own.
+     */
+    private volatile boolean raining = false;
+    private volatile float rainLevel = 0f;
+    private volatile float thunderLevel = 0f;
+    private volatile boolean ghostWeather = false;
+
     // --- Arrival guard: between ServerPreConnect and the arrival chunk being delivered. ---
 
     /** Armed by {@link SwitchManager} when a backend-to-backend switch begins. */
@@ -62,6 +73,15 @@ public final class SwitchState {
 
     /** True while we injected client-side flight to prevent falling/sinking during the chunk gap. */
     private boolean frozeFlight = false;
+
+    /**
+     * False from the moment a switch is armed until the patched Velocity's synthetic ids message
+     * arrives — that message is the FIRST packet ever relayed from the new backend, so anything
+     * seen before it during a switch is late old-server traffic (a rain ramp broadcasts
+     * RAIN_LEVEL_CHANGE every tick, a moving player still receives chunks…) and must keep
+     * counting as ghost state instead of being mistaken for the new server's authority.
+     */
+    private volatile boolean newServerTalking = true;
 
     /**
      * True while WE are sending packets from inside the listener; the re-entrant
@@ -95,8 +115,18 @@ public final class SwitchState {
         teleportSeen = false;
         targetChunkKnown = false;
         frozeFlight = false;
+        newServerTalking = false;
         guardArmedAt = nowMillis;
         guardActive = true;
+    }
+
+    /** True while switch traffic can still be from the OLD server (before the ids message). */
+    public boolean oldServerTalking() {
+        return guardActive && !newServerTalking;
+    }
+
+    public void markNewServerTalking() {
+        newServerTalking = true;
     }
 
     public boolean guardActive() {
@@ -278,6 +308,37 @@ public final class SwitchState {
         this.ghostWindowId = windowId;
     }
 
+    public void raining(boolean value) {
+        this.raining = value;
+    }
+
+    public void rainLevel(float value) {
+        this.rainLevel = value;
+    }
+
+    public void thunderLevel(float value) {
+        this.thunderLevel = value;
+    }
+
+    /** True if the client currently renders any weather (rain flag or a non-zero level). */
+    public boolean weatherActive() {
+        return raining || rainLevel > 0f || thunderLevel > 0f;
+    }
+
+    public void clearWeather() {
+        raining = false;
+        rainLevel = 0f;
+        thunderLevel = 0f;
+    }
+
+    public boolean ghostWeather() {
+        return ghostWeather;
+    }
+
+    public void ghostWeather(boolean value) {
+        this.ghostWeather = value;
+    }
+
     /** Capture the current world as "ghosts" to be removed once the seamless switch completes. */
     public void snapshotGhosts() {
         ghostEntities.clear();
@@ -287,6 +348,7 @@ public final class SwitchState {
         ghostEffects.clear();
         ghostEffects.putAll(activeEffects);
         ghostWindowId = openWindowId;
+        ghostWeather = weatherActive();
     }
 
     public static long chunkKey(int x, int z) {

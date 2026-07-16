@@ -87,13 +87,13 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | View/simulation distance, recipes, advancements | re-sent at join | ✅ automatic |
 | Item cooldowns (ender pearl, shield…) | — | ⚠️ residual visual, expires on its own |
 | Old server's scoreboard objectives/teams | — | ⚠️ to track+clean (if your network uses them) |
-| Ghost weather (old server's rain) | — | ⚠️ to do: track BEGIN/END_RAINING, send END_RAINING on release if the new server sent nothing |
+| Ghost weather (old server's rain) | CHANGE_GAME_STATE weather tracking → END_RAINING + zeroed rain/thunder levels on release if the new server sent no weather | ✅ |
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |
 | Different dimension between servers | — | ❌ unsupported (auto Respawn fallback to implement) |
 
 ## 6. Remaining work
 
-1. The ⚠️/❌ rows of the audit above (weather, scoreboard, cross-dimension fallback).
+1. The ⚠️/❌ rows of the audit above (scoreboard, cross-dimension fallback).
 2. Broader version range (currently developed and tested against 1.21.x), then BungeeCord.
 3. Deployment note: each switch re-sends the player's whole view distance (~400 chunk packets);
    size backend heaps accordingly (≥ 2 GB recommended) — an undersized heap shows up as GC stalls

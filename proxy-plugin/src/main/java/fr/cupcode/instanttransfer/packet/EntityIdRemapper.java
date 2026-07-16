@@ -260,6 +260,9 @@ public final class EntityIdRemapper implements PacketListener {
             return;
         }
         event.setCancelled(true); // synthetic proxy->plugin signal, never meant for the client
+        // The patch writes this message BEFORE relaying anything from the new backend: from here
+        // on, incoming traffic is the new server's (late old-server packets can no longer occur).
+        state.markNewServerTalking();
         String payload = new String(w.getData(), StandardCharsets.UTF_8);
         String[] parts = payload.split(":");
         if (parts.length < 2) {
