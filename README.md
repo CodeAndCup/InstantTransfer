@@ -66,9 +66,8 @@ docs/EXPERIMENTAL.md   R&D log: every approach tried, what failed and why, cover
 
 ## Status & known limits
 
-- ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs, entity-id remap, gamemode resync — validated live on 1.21.x (Velocity dev/3.0.0, Paper 1.21.4).
+- ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs/cooldowns/scoreboards, entity-id remap, gamemode resync — validated live on 1.21.x (Velocity dev/3.0.0, Paper 1.21.4).
 - ⚠️ Same-dimension switches only; identical registries required (different datapacks → do not use).
-- ⚠️ Not yet resynced: old-server scoreboard objectives/teams.
 - ⚠️ A player moving during the ~300 ms handshake may get a harmless server-side position correction (`moved too quickly` in logs).
 
 Inspired by a private implementation showcased by Lodjo28 (no code published); this is an

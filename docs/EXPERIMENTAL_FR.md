@@ -89,14 +89,14 @@ moins invasif possible.
 | Tab-list, boss bars | gérés par Velocity au switch | ✅ automatique |
 | View/simulation distance, recettes, advancements | renvoyés au join | ✅ automatique |
 | Cooldowns d'items (ender pearl, bouclier…) | tracking SET_COOLDOWN → mis à zéro à la release (un vrai join ne les transporte jamais) | ✅ |
-| Scoreboard/objectifs/équipes de l'ancien serveur | — | ⚠️ à tracker+nettoyer (si le réseau en utilise) |
+| Scoreboard/objectifs/équipes de l'ancien serveur | tracking SCOREBOARD_OBJECTIVE/TEAMS → REMOVE à la release (supprimer un objectif supprime aussi ses scores + slot d'affichage ; supprimer une équipe supprime ses membres) | ✅ |
 | Météo fantôme (pluie de l'ancien serveur) | tracking météo CHANGE_GAME_STATE → END_RAINING + niveaux pluie/orage à zéro à la release si le nouveau serveur n'a rien envoyé | ✅ |
 | GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |
 | Dimension différente entre serveurs | — | ❌ non supporté (fallback Respawn auto à implémenter) |
 
 ## 6. Travail restant
 
-1. Les lignes ⚠️/❌ de l'audit ci-dessus (scoreboard, fallback cross-dimension).
+1. La ligne ❌ de l'audit ci-dessus (fallback cross-dimension).
 2. Plage de versions élargie (développé et testé contre 1.21.x), puis BungeeCord.
 3. Note de déploiement : chaque switch renvoie toute la view distance du joueur (~400 paquets de
    chunks) ; dimensionner le heap des backends en conséquence (≥ 2 Go recommandé) — un heap trop

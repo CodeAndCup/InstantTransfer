@@ -28,13 +28,16 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOp
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerAbilities;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetCooldown;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
 import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -168,6 +171,34 @@ public final class SeamlessPacketListener implements PacketListener {
                     String key = w.getPotionType().getName().toString();
                     state.activeEffects().remove(key);
                     state.ghostEffects().remove(key);
+                }
+
+            } else if (type == PacketType.Play.Server.SCOREBOARD_OBJECTIVE) {
+                WrapperPlayServerScoreboardObjective w = new WrapperPlayServerScoreboardObjective(event);
+                if (w.getMode() == WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE) {
+                    state.activeObjectives().add(w.getName());
+                    if (state.oldServerTalking()) {
+                        state.ghostObjectives().add(w.getName());
+                    } else {
+                        state.ghostObjectives().remove(w.getName()); // new server re-created it
+                    }
+                } else if (w.getMode() == WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE) {
+                    state.activeObjectives().remove(w.getName());
+                    state.ghostObjectives().remove(w.getName());
+                }
+
+            } else if (type == PacketType.Play.Server.TEAMS) {
+                WrapperPlayServerTeams w = new WrapperPlayServerTeams(event);
+                if (w.getTeamMode() == WrapperPlayServerTeams.TeamMode.CREATE) {
+                    state.activeTeams().add(w.getTeamName());
+                    if (state.oldServerTalking()) {
+                        state.ghostTeams().add(w.getTeamName());
+                    } else {
+                        state.ghostTeams().remove(w.getTeamName()); // new server re-created it
+                    }
+                } else if (w.getTeamMode() == WrapperPlayServerTeams.TeamMode.REMOVE) {
+                    state.activeTeams().remove(w.getTeamName());
+                    state.ghostTeams().remove(w.getTeamName());
                 }
 
             } else if (type == PacketType.Play.Server.SET_COOLDOWN) {
@@ -383,6 +414,27 @@ public final class SeamlessPacketListener implements PacketListener {
         }
         ghostEffects.clear();
 
+        // Scoreboard leftovers the new server did not re-create: removing an objective also clears
+        // its scores and any display slot (sidebar…) client-side; removing a team clears its
+        // memberships, name colors and prefixes.
+        Set<String> ghostObjectives = state.ghostObjectives();
+        int objectiveCount = ghostObjectives.size();
+        for (String name : ghostObjectives) {
+            sendSuppressed(user, state, new WrapperPlayServerScoreboardObjective(
+                    name, WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE, null, null));
+        }
+        state.activeObjectives().removeAll(ghostObjectives);
+        ghostObjectives.clear();
+
+        Set<String> ghostTeams = state.ghostTeams();
+        int teamCount = ghostTeams.size();
+        for (String name : ghostTeams) {
+            sendSuppressed(user, state, new WrapperPlayServerTeams(
+                    name, WrapperPlayServerTeams.TeamMode.REMOVE, Optional.empty()));
+        }
+        state.activeTeams().removeAll(ghostTeams);
+        ghostTeams.clear();
+
         // Item cooldowns never carry over a real join (the new server starts from zero and vanilla
         // does not resend them): zero any overlay left from the previous server, so the same item
         // type in the new inventory doesn't show a stale cooldown sweep.
@@ -427,8 +479,10 @@ public final class SeamlessPacketListener implements PacketListener {
         }
 
         logger.info("[InstantTransfer] seamless arrival for {} ({}): removed {} ghost entities, "
-                        + "{} ghost chunks, {} ghost effects, {} ghost cooldowns{}{}",
+                        + "{} ghost chunks, {} ghost effects, {} ghost cooldowns, "
+                        + "{} ghost objectives, {} ghost teams{}{}",
                 user.getName(), reason, entityCount, chunkCount, effectCount, cooldownCount,
+                objectiveCount, teamCount,
                 ghostWeather ? ", cleared ghost weather" : "",
                 ghostWindow != -1 ? ", closed ghost GUI #" + ghostWindow : "");
     }

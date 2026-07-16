@@ -47,6 +47,17 @@ public final class SwitchState {
     private final Map<String, ResourceLocation> ghostCooldowns = new ConcurrentHashMap<>();
 
     /**
+     * Scoreboard objectives and teams the client currently knows. Without a Respawn nothing tears
+     * down the old server's sidebar/objectives (their scores and display slots die with the
+     * objective) or teams (name colors, prefixes, collision rules), so any the new server does
+     * not re-create are snapshot as ghosts and removed on arrival.
+     */
+    private final Set<String> activeObjectives = ConcurrentHashMap.newKeySet();
+    private final Set<String> ghostObjectives = ConcurrentHashMap.newKeySet();
+    private final Set<String> activeTeams = ConcurrentHashMap.newKeySet();
+    private final Set<String> ghostTeams = ConcurrentHashMap.newKeySet();
+
+    /**
      * Container window the client currently has open (chest, furnace, horse…), -1 if none. Without
      * a Respawn nothing closes it on a switch, so the old server's GUI would stay open on the new
      * server (and clicks would target a window id the new server never assigned). Snapshot as a
@@ -311,6 +322,22 @@ public final class SwitchState {
         return ghostCooldowns;
     }
 
+    public Set<String> activeObjectives() {
+        return activeObjectives;
+    }
+
+    public Set<String> ghostObjectives() {
+        return ghostObjectives;
+    }
+
+    public Set<String> activeTeams() {
+        return activeTeams;
+    }
+
+    public Set<String> ghostTeams() {
+        return ghostTeams;
+    }
+
     public int openWindowId() {
         return openWindowId;
     }
@@ -368,6 +395,10 @@ public final class SwitchState {
         ghostEffects.putAll(activeEffects);
         ghostCooldowns.clear();
         ghostCooldowns.putAll(activeCooldowns);
+        ghostObjectives.clear();
+        ghostObjectives.addAll(activeObjectives);
+        ghostTeams.clear();
+        ghostTeams.addAll(activeTeams);
         ghostWindowId = openWindowId;
         ghostWeather = weatherActive();
     }
