@@ -26,8 +26,7 @@ import java.nio.file.Path;
         authors = {"CupCode"},
         dependencies = {@Dependency(id = "packetevents")}
 )
-public final class
-InstantTransfer {
+public final class InstantTransfer {
 
     private final ProxyServer proxy;
     private final Logger logger;
@@ -66,12 +65,7 @@ InstantTransfer {
                 new SeamlessPacketListener(switchManager, coordManager, config, logger),
                 PacketListenerPriority.NORMAL);
 
-        if (config.diagnosticMode()) {
-            logger.info("[InstantTransfer] enabled in DIAGNOSTIC mode (observe-only, cancels nothing). "
-                    + "Set diagnostic-mode=false in config.properties to run the real seamless switch.");
-        } else {
-            logger.info("[InstantTransfer] enabled (require-same-dimension={}, debug={}).",
-                    config.requireSameDimension(), config.debug());
-        }
+        logger.info("[InstantTransfer] enabled (require-same-dimension={}, debug={}).",
+                config.requireSameDimension(), config.debug());
     }
 }

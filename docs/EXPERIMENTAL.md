@@ -85,7 +85,7 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Health / food / XP / held slot / inventory | re-sent by the new server on its first tick (dirty-sync) | ✅ automatic |
 | Tab list, boss bars | handled by Velocity on switch | ✅ automatic |
 | View/simulation distance, recipes, advancements | re-sent at join | ✅ automatic |
-| Item cooldowns (ender pearl, shield…) | — | ⚠️ residual visual, expires on its own |
+| Item cooldowns (ender pearl, shield…) | SET_COOLDOWN tracking → zeroed on release (a real join never carries them over) | ✅ |
 | Old server's scoreboard objectives/teams | — | ⚠️ to track+clean (if your network uses them) |
 | Ghost weather (old server's rain) | CHANGE_GAME_STATE weather tracking → END_RAINING + zeroed rain/thunder levels on release if the new server sent no weather | ✅ |
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |

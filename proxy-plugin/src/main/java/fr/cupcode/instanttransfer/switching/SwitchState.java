@@ -1,6 +1,7 @@
 package fr.cupcode.instanttransfer.switching;
 
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
+import com.github.retrooper.packetevents.resources.ResourceLocation;
 
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +35,16 @@ public final class SwitchState {
      */
     private final Map<String, PotionType> activeEffects = new ConcurrentHashMap<>();
     private final Map<String, PotionType> ghostEffects = new ConcurrentHashMap<>();
+
+    /**
+     * Item cooldowns the client currently displays (SET_COOLDOWN, keyed by cooldown group — the
+     * item name pre-1.21.2). A fresh join never carries cooldowns over (the new server starts from
+     * zero and vanilla doesn't resend them), so the old server's overlay would linger on the same
+     * item type in the new inventory — snapshot as ghosts, zeroed on arrival. Entries whose
+     * client-side countdown already expired just make the zeroing a no-op.
+     */
+    private final Map<String, ResourceLocation> activeCooldowns = new ConcurrentHashMap<>();
+    private final Map<String, ResourceLocation> ghostCooldowns = new ConcurrentHashMap<>();
 
     /**
      * Container window the client currently has open (chest, furnace, horse…), -1 if none. Without
@@ -292,6 +303,14 @@ public final class SwitchState {
         return ghostEffects;
     }
 
+    public Map<String, ResourceLocation> activeCooldowns() {
+        return activeCooldowns;
+    }
+
+    public Map<String, ResourceLocation> ghostCooldowns() {
+        return ghostCooldowns;
+    }
+
     public int openWindowId() {
         return openWindowId;
     }
@@ -347,6 +366,8 @@ public final class SwitchState {
         ghostChunks.addAll(loadedChunks);
         ghostEffects.clear();
         ghostEffects.putAll(activeEffects);
+        ghostCooldowns.clear();
+        ghostCooldowns.putAll(activeCooldowns);
         ghostWindowId = openWindowId;
         ghostWeather = weatherActive();
     }

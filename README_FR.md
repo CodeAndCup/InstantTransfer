@@ -70,7 +70,7 @@ docs/EXPERIMENTAL_FR.md   Journal de R&D : approches essayées, échecs et cause
 - ✅ Zéro écran, pas de dégâts de chute, pas d'entités/chunks/effets/météo/GUI fantômes, remap
   entity-id, resync du gamemode — validé en live sur 1.21.x (Velocity dev/3.0.0, Paper 1.21.4).
 - ⚠️ Switchs même-dimension uniquement ; registres identiques requis (datapacks différents → ne pas utiliser).
-- ⚠️ Pas encore resynchronisé : scoreboard/objectifs/équipes de l'ancien serveur, visuels de cooldown d'items (expirent seuls).
+- ⚠️ Pas encore resynchronisé : scoreboard/objectifs/équipes de l'ancien serveur.
 - ⚠️ Un joueur qui bouge pendant le handshake (~300 ms) peut recevoir une correction de position bénigne (`moved too quickly` dans les logs).
 
 Inspiré d'une implémentation privée montrée par Lodjo28 (code non publié) ; ceci est une

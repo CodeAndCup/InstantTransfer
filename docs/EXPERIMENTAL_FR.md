@@ -88,7 +88,7 @@ moins invasif possible.
 | Vie / faim / XP / slot main / inventaire | renvoyés par le nouveau serveur à son 1er tick (dirty-sync) | ✅ automatique |
 | Tab-list, boss bars | gérés par Velocity au switch | ✅ automatique |
 | View/simulation distance, recettes, advancements | renvoyés au join | ✅ automatique |
-| Cooldowns d'items (ender pearl, bouclier…) | — | ⚠️ visuel résiduel, expire seul |
+| Cooldowns d'items (ender pearl, bouclier…) | tracking SET_COOLDOWN → mis à zéro à la release (un vrai join ne les transporte jamais) | ✅ |
 | Scoreboard/objectifs/équipes de l'ancien serveur | — | ⚠️ à tracker+nettoyer (si le réseau en utilise) |
 | Météo fantôme (pluie de l'ancien serveur) | tracking météo CHANGE_GAME_STATE → END_RAINING + niveaux pluie/orage à zéro à la release si le nouveau serveur n'a rien envoyé | ✅ |
 | GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |

@@ -14,6 +14,7 @@ import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
+import com.github.retrooper.packetevents.resources.ResourceLocation;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientCloseWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
@@ -27,6 +28,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOp
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerAbilities;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetCooldown;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
 import org.slf4j.Logger;
@@ -166,6 +168,28 @@ public final class SeamlessPacketListener implements PacketListener {
                     String key = w.getPotionType().getName().toString();
                     state.activeEffects().remove(key);
                     state.ghostEffects().remove(key);
+                }
+
+            } else if (type == PacketType.Play.Server.SET_COOLDOWN) {
+                WrapperPlayServerSetCooldown w = new WrapperPlayServerSetCooldown(event);
+                if (config.debug()) {
+                    logger.info("[InstantTransfer] SET_COOLDOWN {} = {} ticks for {} (oldServer={})",
+                            w.getCooldownGroup(), w.getCooldownTicks(), user.getName(),
+                            state.oldServerTalking());
+                }
+                if (w.getCooldownGroup() != null) {
+                    String key = w.getCooldownGroup().toString();
+                    if (w.getCooldownTicks() > 0) {
+                        state.activeCooldowns().put(key, w.getCooldownGroup());
+                        if (state.oldServerTalking()) {
+                            state.ghostCooldowns().put(key, w.getCooldownGroup());
+                        } else {
+                            state.ghostCooldowns().remove(key);
+                        }
+                    } else {
+                        state.activeCooldowns().remove(key);
+                        state.ghostCooldowns().remove(key);
+                    }
                 }
 
             } else if (type == PacketType.Play.Server.CHANGE_GAME_STATE) {
@@ -359,6 +383,23 @@ public final class SeamlessPacketListener implements PacketListener {
         }
         ghostEffects.clear();
 
+        // Item cooldowns never carry over a real join (the new server starts from zero and vanilla
+        // does not resend them): zero any overlay left from the previous server, so the same item
+        // type in the new inventory doesn't show a stale cooldown sweep.
+        Map<String, ResourceLocation> ghostCooldowns = state.ghostCooldowns();
+        int cooldownCount = ghostCooldowns.size();
+        if (cooldownCount > 0) {
+            for (ResourceLocation group : ghostCooldowns.values()) {
+                if (config.debug()) {
+                    logger.info("[InstantTransfer] zeroing ghost cooldown {} for {}",
+                            group, user.getName());
+                }
+                sendSuppressed(user, state, new WrapperPlayServerSetCooldown(group, 0));
+            }
+            state.activeCooldowns().keySet().removeAll(ghostCooldowns.keySet());
+        }
+        ghostCooldowns.clear();
+
         // Weather from the previous server the new one never countermanded (a non-raining server
         // sends NO weather packet on join): stop it explicitly. END_RAINING alone only starts a
         // slow client-side fade — zeroing both levels makes the sky clear instantly.
@@ -386,8 +427,8 @@ public final class SeamlessPacketListener implements PacketListener {
         }
 
         logger.info("[InstantTransfer] seamless arrival for {} ({}): removed {} ghost entities, "
-                        + "{} ghost chunks, {} ghost effects{}{}",
-                user.getName(), reason, entityCount, chunkCount, effectCount,
+                        + "{} ghost chunks, {} ghost effects, {} ghost cooldowns{}{}",
+                user.getName(), reason, entityCount, chunkCount, effectCount, cooldownCount,
                 ghostWeather ? ", cleared ghost weather" : "",
                 ghostWindow != -1 ? ", closed ghost GUI #" + ghostWindow : "");
     }

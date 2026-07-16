@@ -29,13 +29,6 @@ public final class PluginConfig {
     /** Verbose per-packet logging. Handy for the first tests; turn off in production. */
     private boolean debug = true;
 
-    /**
-     * Observation-only mode: the plugin cancels NOTHING and never rewrites packets. It only logs
-     * the exact clientbound packet timeline (with connection state PLAY/CONFIGURATION) around a
-     * switch, so we can see what Velocity really sends before deciding where to intervene.
-     */
-    private boolean diagnosticMode = true;
-
     private PluginConfig() {
     }
 
@@ -51,10 +44,6 @@ public final class PluginConfig {
         return debug;
     }
 
-    public boolean diagnosticMode() {
-        return diagnosticMode;
-    }
-
     public static PluginConfig load(Path dataDirectory, Logger logger) {
         PluginConfig config = new PluginConfig();
         try {
@@ -68,12 +57,10 @@ public final class PluginConfig {
                 config.seamlessEnabled = parseBool(props, "seamless-enabled", config.seamlessEnabled);
                 config.requireSameDimension = parseBool(props, "require-same-dimension", config.requireSameDimension);
                 config.debug = parseBool(props, "debug", config.debug);
-                config.diagnosticMode = parseBool(props, "diagnostic-mode", config.diagnosticMode);
             } else {
                 props.setProperty("seamless-enabled", Boolean.toString(config.seamlessEnabled));
                 props.setProperty("require-same-dimension", Boolean.toString(config.requireSameDimension));
                 props.setProperty("debug", Boolean.toString(config.debug));
-                props.setProperty("diagnostic-mode", Boolean.toString(config.diagnosticMode));
                 try (OutputStream out = Files.newOutputStream(file)) {
                     props.store(out, "InstantTransfer configuration");
                 }
