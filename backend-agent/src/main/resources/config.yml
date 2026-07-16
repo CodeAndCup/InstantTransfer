@@ -1,0 +1,6 @@
+# InstantTransferAgent
+#
+# debug: verbose logging — the [DIAG-BACKEND] packet handshake dump, [COORD] channel messages
+# and [fall-guard] details. Useful while testing the seamless switch; set to false once your
+# network is stable to keep the console quiet.
+debug: true
