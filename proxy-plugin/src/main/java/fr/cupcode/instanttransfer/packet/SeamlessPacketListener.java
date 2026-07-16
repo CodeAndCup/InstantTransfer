@@ -5,6 +5,7 @@ import fr.cupcode.instanttransfer.coord.CoordManager;
 import fr.cupcode.instanttransfer.switching.SwitchManager;
 import fr.cupcode.instanttransfer.switching.SwitchState;
 import com.github.retrooper.packetevents.event.PacketListener;
+import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
@@ -13,12 +14,16 @@ import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientCloseWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCloseWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityEffect;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerJoinGame;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenHorseWindow;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerOpenWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerAbilities;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
@@ -145,6 +150,18 @@ public final class SeamlessPacketListener implements PacketListener {
                     state.ghostEffects().remove(key);
                 }
 
+            } else if (type == PacketType.Play.Server.OPEN_WINDOW) {
+                state.openWindowId(new WrapperPlayServerOpenWindow(event).getContainerId());
+                state.ghostWindowId(-1); // the new GUI replaces whatever was open before
+
+            } else if (type == PacketType.Play.Server.OPEN_HORSE_WINDOW) {
+                state.openWindowId(new WrapperPlayServerOpenHorseWindow(event).getWindowId());
+                state.ghostWindowId(-1);
+
+            } else if (type == PacketType.Play.Server.CLOSE_WINDOW) {
+                state.openWindowId(-1);
+                state.ghostWindowId(-1);
+
             } else if (type == PacketType.Play.Server.PLAYER_ABILITIES) {
                 WrapperPlayServerPlayerAbilities w = new WrapperPlayServerPlayerAbilities(event);
                 state.rememberAbilities(w.isInGodMode(), w.isFlying(), w.isFlightAllowed(),
@@ -165,6 +182,27 @@ public final class SeamlessPacketListener implements PacketListener {
             if (config.debug()) {
                 logger.warn("[InstantTransfer] listener error on {}: {}", type, e.toString());
             }
+        }
+    }
+
+    @Override
+    public void onPacketReceive(PacketReceiveEvent event) {
+        User user = event.getUser();
+        if (user == null || user.getUUID() == null
+                || event.getPacketType() != PacketType.Play.Client.CLOSE_WINDOW) {
+            return;
+        }
+        SwitchState state = manager.getOrCreate(user.getUUID());
+        if (state.suppressListener()) {
+            return;
+        }
+        // The player closed the GUI themselves (ESC also closes the old server's window mid-switch).
+        int windowId = new WrapperPlayClientCloseWindow(event).getWindowId();
+        if (windowId == state.openWindowId()) {
+            state.openWindowId(-1);
+        }
+        if (windowId == state.ghostWindowId()) {
+            state.ghostWindowId(-1);
         }
     }
 
@@ -276,9 +314,21 @@ public final class SeamlessPacketListener implements PacketListener {
         }
         ghostEffects.clear();
 
+        // A container GUI left open on the previous server: nothing else ever closes it (no
+        // Respawn), and its window id means nothing to the new server — close it client-side.
+        int ghostWindow = state.ghostWindowId();
+        if (ghostWindow != -1) {
+            sendSuppressed(user, state, new WrapperPlayServerCloseWindow(ghostWindow));
+            if (state.openWindowId() == ghostWindow) {
+                state.openWindowId(-1);
+            }
+            state.ghostWindowId(-1);
+        }
+
         logger.info("[InstantTransfer] seamless arrival for {} ({}): removed {} ghost entities, "
-                        + "{} ghost chunks, {} ghost effects",
-                user.getName(), reason, entityCount, chunkCount, effectCount);
+                        + "{} ghost chunks, {} ghost effects{}",
+                user.getName(), reason, entityCount, chunkCount, effectCount,
+                ghostWindow != -1 ? ", closed ghost GUI #" + ghostWindow : "");
     }
 
     /** Send a packet of ours without re-triggering this listener (see class javadoc). */

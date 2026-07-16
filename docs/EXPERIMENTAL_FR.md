@@ -91,12 +91,12 @@ moins invasif possible.
 | Cooldowns d'items (ender pearl, bouclier…) | — | ⚠️ visuel résiduel, expire seul |
 | Scoreboard/objectifs/équipes de l'ancien serveur | — | ⚠️ à tracker+nettoyer (si le réseau en utilise) |
 | Météo fantôme (pluie de l'ancien serveur) | — | ⚠️ à faire : tracker BEGIN/END_RAINING, envoyer END_RAINING à la release si le nouveau serveur n'a rien envoyé |
-| GUI/coffre ouvert pendant le switch | — | ⚠️ edge case : tracker OPEN_WINDOW → CloseWindow à la release |
+| GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |
 | Dimension différente entre serveurs | — | ❌ non supporté (fallback Respawn auto à implémenter) |
 
 ## 6. Travail restant
 
-1. Les lignes ⚠️/❌ de l'audit ci-dessus (météo, scoreboard, GUI ouvert, fallback cross-dimension).
+1. Les lignes ⚠️/❌ de l'audit ci-dessus (météo, scoreboard, fallback cross-dimension).
 2. Plage de versions élargie (développé et testé contre 1.21.x), puis BungeeCord.
 3. Note de déploiement : chaque switch renvoie toute la view distance du joueur (~400 paquets de
    chunks) ; dimensionner le heap des backends en conséquence (≥ 2 Go recommandé) — un heap trop

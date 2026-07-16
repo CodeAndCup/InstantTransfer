@@ -35,6 +35,16 @@ public final class SwitchState {
     private final Map<String, PotionType> activeEffects = new ConcurrentHashMap<>();
     private final Map<String, PotionType> ghostEffects = new ConcurrentHashMap<>();
 
+    /**
+     * Container window the client currently has open (chest, furnace, horse…), -1 if none. Without
+     * a Respawn nothing closes it on a switch, so the old server's GUI would stay open on the new
+     * server (and clicks would target a window id the new server never assigned). Snapshot as a
+     * ghost and closed on arrival. (The player's own inventory screen sends no open packet and
+     * needs no cleanup: the new server resyncs container 0 on join.)
+     */
+    private volatile int openWindowId = -1;
+    private volatile int ghostWindowId = -1;
+
     // --- Arrival guard: between ServerPreConnect and the arrival chunk being delivered. ---
 
     /** Armed by {@link SwitchManager} when a backend-to-backend switch begins. */
@@ -252,6 +262,22 @@ public final class SwitchState {
         return ghostEffects;
     }
 
+    public int openWindowId() {
+        return openWindowId;
+    }
+
+    public void openWindowId(int windowId) {
+        this.openWindowId = windowId;
+    }
+
+    public int ghostWindowId() {
+        return ghostWindowId;
+    }
+
+    public void ghostWindowId(int windowId) {
+        this.ghostWindowId = windowId;
+    }
+
     /** Capture the current world as "ghosts" to be removed once the seamless switch completes. */
     public void snapshotGhosts() {
         ghostEntities.clear();
@@ -260,6 +286,7 @@ public final class SwitchState {
         ghostChunks.addAll(loadedChunks);
         ghostEffects.clear();
         ghostEffects.putAll(activeEffects);
+        ghostWindowId = openWindowId;
     }
 
     public static long chunkKey(int x, int z) {
