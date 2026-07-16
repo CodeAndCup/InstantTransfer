@@ -11,7 +11,7 @@ no visible transition.
 
 ## 🎬 Demo
 
-**[▶️ Watch the demo video](docs/InstantTransfer-demo.mp4)** — a live switch between two backends:
+**[▶️ Watch the demo video](https://www.youtube.com/watch?v=Lma-BhOcg7I)** — a live switch between two backends:
 no loading screen, the world simply morphs around the player.
 
 ## ⚠️ Experimental — do NOT use in production

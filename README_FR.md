@@ -11,7 +11,7 @@ d'écran, pas de déconnexion, aucune transition visible.
 
 ## 🎬 Démo
 
-**[▶️ Voir la vidéo de démo](docs/InstantTransfer-demo.mp4)** — un switch en direct entre deux
+**[▶️ Voir la vidéo de démo](https://www.youtube.com/watch?v=Lma-BhOcg7I)** — un switch en direct entre deux
 backends : aucun écran de chargement, le monde se transforme simplement autour du joueur.
 
 ## ⚠️ Expérimental — à NE PAS mettre en production
