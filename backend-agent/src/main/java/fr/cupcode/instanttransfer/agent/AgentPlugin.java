@@ -33,7 +33,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
     public static final String COORD_CHANNEL = "instanttransfer:coord";
 
     /** Ticks of fall-damage immunity granted right after a player arrives on this backend. */
-    private static final long FALL_GRACE_TICKS = 60L; // ~3 seconds
+    private static final long FALL_GRACE_TICKS = 20L; // ~1 second (proxy unfreeze via coord channel is faster)
 
     private final Set<UUID> fallGrace = ConcurrentHashMap.newKeySet();
 

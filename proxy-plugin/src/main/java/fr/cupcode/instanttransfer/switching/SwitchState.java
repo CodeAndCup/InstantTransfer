@@ -93,6 +93,12 @@ public final class SwitchState {
     private boolean targetChunkKnown = false;
     private int targetChunkX, targetChunkZ;
 
+    /** Arrival position (from the teleport packet), stored for timeout position correction. */
+    private double arrivalX, arrivalY, arrivalZ;
+    private float arrivalYaw, arrivalPitch;
+    private boolean arrivalPositionKnown = false;
+    private boolean arrivalPositionAbsolute = false;
+
     /** True while we injected client-side flight to prevent falling/sinking during the chunk gap. */
     private boolean frozeFlight = false;
 
@@ -147,6 +153,8 @@ public final class SwitchState {
     public void armGuard(long nowMillis) {
         teleportSeen = false;
         targetChunkKnown = false;
+        arrivalPositionKnown = false;
+        arrivalPositionAbsolute = false;
         frozeFlight = false;
         newServerTalking = false;
         guardArmedAt = nowMillis;
@@ -215,6 +223,44 @@ public final class SwitchState {
 
     public int targetChunkZ() {
         return targetChunkZ;
+    }
+
+    public boolean arrivalPositionKnown() {
+        return arrivalPositionKnown;
+    }
+
+    public boolean arrivalPositionAbsolute() {
+        return arrivalPositionAbsolute;
+    }
+
+    public void arrivalPosition(double x, double y, double z, float yaw, float pitch, boolean absolute) {
+        this.arrivalX = x;
+        this.arrivalY = y;
+        this.arrivalZ = z;
+        this.arrivalYaw = yaw;
+        this.arrivalPitch = pitch;
+        this.arrivalPositionKnown = true;
+        this.arrivalPositionAbsolute = absolute;
+    }
+
+    public double arrivalX() {
+        return arrivalX;
+    }
+
+    public double arrivalY() {
+        return arrivalY;
+    }
+
+    public double arrivalZ() {
+        return arrivalZ;
+    }
+
+    public float arrivalYaw() {
+        return arrivalYaw;
+    }
+
+    public float arrivalPitch() {
+        return arrivalPitch;
     }
 
     public boolean frozeFlight() {
