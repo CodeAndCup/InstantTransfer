@@ -5,18 +5,22 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>fr.cupcode</groupId>
-    <artifactId>instanttransfer-agent</artifactId>
+    <artifactId>instanttransfer-backend-agent</artifactId>
     <version>0.1.0</version>
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
 
-    <name>InstantTransferAgent</name>
-    <description>Backend-side agent for the coordinated seamless-transfer system (diagnostic + coordination channel).</description>
+    <name>InstantTransfer Backend Agent (parent)</name>
+    <description>Multi-platform backend agent modules.</description>
+
+    <modules>
+        <module>core</module>
+        <module>paper</module>
+        <module>spigot</module>
+    </modules>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
-        <paper.version>1.21.8-R0.1-SNAPSHOT</paper.version>
-        <packetevents.version>2.13.0</packetevents.version>
     </properties>
 
     <repositories>
@@ -30,29 +34,30 @@
         </repository>
     </repositories>
 
-    <dependencies>
-        <dependency>
-            <groupId>io.papermc.paper</groupId>
-            <artifactId>paper-api</artifactId>
-            <version>${paper.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.github.retrooper</groupId>
-            <artifactId>packetevents-spigot</artifactId>
-            <version>${packetevents.version}</version>
-            <scope>provided</scope>
-        </dependency>
-    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>fr.cupcode</groupId>
+                <artifactId>instanttransfer-agent-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
-        <finalName>${project.name}-${project.version}</finalName>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
-            </plugin>
-        </plugins>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>3.6.0</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
 </project>

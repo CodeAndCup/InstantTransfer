@@ -1,0 +1,11 @@
+name: InstantTransferAgent
+version: 0.1.0
+main: fr.cupcode.instanttransfer.agent.AgentPlugin
+api-version: 1.21
+description: Backend-side agent for coordinated seamless-transfer system (Purpur)
+author: CupCode
+depend: [PacketEvents]
+softdepend: []
+
+commands: {}
+permissions: {}

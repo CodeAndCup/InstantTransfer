@@ -1,7 +1,0 @@
-name: InstantTransferAgent
-version: 0.1.0
-main: fr.cupcode.instanttransfer.agent.AgentPlugin
-api-version: '1.21'
-author: CupCode
-description: Backend agent for the coordinated seamless-transfer system (diagnostic + coord channel).
-depend: [packetevents]
