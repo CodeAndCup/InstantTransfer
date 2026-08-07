@@ -18,8 +18,10 @@ Goal: switch a player between backend servers with **zero visible transition** �
 | **No disconnect** during the switch | Confirmed in live tests | — |
 | **Ghost cleanup** (old server's mobs/chunks/potion effects) | packetevents tracking proxy-side + DestroyEntities/UnloadChunk/RemoveEntityEffect + particle-metadata reset on arrival | proxy plugin |
 | **No arrival fall damage / fall-through-ground** | Arrival flight-freeze (proxy) + grace window (agent) | proxy plugin + agent |
-| **Entity-id remap** (Velocity issue #251: F3+F4 op level, knockback, effects, attributes) | Synthetic ids message from the patch + symmetric id swap in the plugin | patch + proxy plugin |
+| **Entity-id remap** (Velocity issue #251: F3+F4 op level, knockback, effects, attributes) | Synthetic ids message from the patch + **directional** id rewrite in the plugin (backendId→clientId server→client, clientId→backendId client→server) | patch + proxy plugin |
 | **Gamemode resync** (broke eating with an infinite-chew loop) | Gamemode carried in the ids message + ChangeGameState on arrival | patch + proxy plugin |
+| **Cross-dimension fallback** (zero-screen unsafe if dim differs) | Patch tracks client dim; auto-fallback to Respawn KEEP_ALL_DATA if backend dim ≠ client dim | `velocity-patch/` |
+| **Timeout rollback fix** (3 s guard timeout caused rollback) | On timeout: send position correction to absolute arrival pos + keep flight enabled; extend guard. Only works for absolute teleports. | proxy plugin |
 
 ## 2. Approaches TRIED and REJECTED (do not retry)
 
@@ -45,13 +47,16 @@ Goal: switch a player between backend servers with **zero visible transition** �
    ├─ tracks client-visible state: entities, chunks, self potion effects, abilities
    ├─ on arrival: the teleport PASSES (handshake intact) + FLIGHT FREEZE injected
    │  (the client hovers in place → no falling, no sinking while chunks load)
-   ├─ when the arrival chunk lands (or 3 s timeout): restores real abilities,
+   ├─ when the arrival chunk lands (or timeout): restores real abilities,
    │  removes ghosts (entities/chunks/effects + swirl metadata), resyncs gamemode,
    │  tells the agent to end its grace (coord channel)
-   └─ entity-id SWAP both ways (self packets reach the client; reverse collisions shielded)
+   ├─ **entity-id directional rewrite**: server→client rewrites backendId→clientId;
+   │  client→server rewrites clientId→backendId (no swap on other entities)
+   └─ **timeout guard**: configurable (default 5 s); on timeout sends position correction
+      to absolute arrival coords + keeps flight; extends guard until chunk arrives
 
 [Backend agent]  backend-agent/  (on EVERY backend, + packetevents-spigot)
-   ├─ fall-guard: cancels FALL/SUFFOCATION damage for a 3 s grace
+   ├─ fall-guard: cancels FALL/SUFFOCATION damage for a **1 s** grace (was 3 s)
    └─ temporary allowFlight during the grace (else the freeze would kick
       "Flying is not enabled"), revoked instantly on the proxy's unfreeze message
 ```
@@ -70,6 +75,7 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Config skip | `-Dvelocity.seamlessSwitch=false` to disable | ON |
 | Respawn mode (robust fallback, brief flash) | `-Dvelocity.seamlessRespawn=true` | OFF (= zero screen) |
 | Proxy plugin master switch / debug | `plugins/instanttransfer/config.properties` | enabled |
+| **Guard timeout (ms)** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
 | Agent verbose logs ([DIAG-BACKEND], [COORD], [fall-guard]) | backend `plugins/InstantTransferAgent/config.yml` → `debug` | true |
 
 ## 5. Coverage audit — "everything JoinGame/Respawn used to reset for us"
@@ -90,12 +96,11 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Ghost weather (old server's rain) | CHANGE_GAME_STATE weather tracking → END_RAINING + zeroed rain/thunder levels on release if the new server sent no weather | ✅ |
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |
 | Own tab-list entry (the client caches its PlayerInfo object inside the player entity; a remove/re-add cycle strands the cache → spectator noclip breaks, isSpectator/isCreative read a stale gamemode) | own-UUID filtered out of PLAYER_INFO_REMOVE + re-ADDs downgraded to in-place updates of the surviving entry | ✅ |
-| Different dimension between servers | — | ❌ unsupported (auto Respawn fallback to implement) |
+| Different dimension between servers | **Auto-fallback to Respawn KEEP_ALL_DATA** (patch tracks client dim; if backend dim ≠ client dim, sends Respawn instead of zero-screen) | ✅ |
 
 ## 6. Remaining work
 
-1. The ❌ row of the audit above (cross-dimension fallback).
-2. Broader version range (currently developed and tested against 1.21.x), then BungeeCord.
-3. Deployment note: each switch re-sends the player's whole view distance (~400 chunk packets);
+1. Broader version range (currently developed and tested against 1.21.x), then BungeeCord.
+2. Deployment note: each switch re-sends the player's whole view distance (~400 chunk packets);
    size backend heaps accordingly (≥ 2 GB recommended) — an undersized heap shows up as GC stalls
    ("Can't keep up!") and eventually OutOfMemoryError during chunk saves.

@@ -19,8 +19,10 @@ Cible : MC 1.21.x, Velocity + Paper.
 | **Pas de déconnexion** pendant le switch | Confirmé en tests live | — |
 | **Nettoyage des fantômes** (mobs/chunks/effets de potion de l'ancien serveur) | Tracking packetevents côté proxy + DestroyEntities/UnloadChunk/RemoveEntityEffect + reset des metadata de particules à l'arrivée | plugin proxy |
 | **Pas de dégâts de chute / traversée du sol** à l'arrivée | Gel en vol (proxy) + fenêtre de grâce (agent) | plugin proxy + agent |
-| **Remap d'entity-id** (issue Velocity #251 : niveau OP F3+F4, knockback, effets, attributs) | Message ids synthétique du patch + swap symétrique dans le plugin | patch + plugin proxy |
+| **Remap d'entity-id** (issue Velocity #251 : niveau OP F3+F4, knockback, effets, attributs) | Message ids synthétique du patch + **rewrite directionnel** dans le plugin (backendId→clientId serveur→client, clientId→backendId client→serveur) | patch + plugin proxy |
 | **Resync du gamemode** (cassait la bouffe : mastication infinie) | Gamemode transporté dans le message ids + ChangeGameState à l'arrivée | patch + plugin proxy |
+| **Fallback cross-dimension** (zéro-écran unsafe si dim différente) | Patch trace la dim client ; fallback auto vers Respawn KEEP_ALL_DATA si dim backend ≠ dim client | `velocity-patch/` |
+| **Fix rollback timeout** (garde 3 s causait rollback) | Au timeout : envoie correction position aux coords absolues d'arrivée + garde le vol ; étend la garde. Ne marche que pour téléports absolus. | plugin proxy |
 
 ## 2. Méthodes TESTÉES et REJETÉES (ne pas re-tenter)
 
@@ -46,14 +48,16 @@ Cible : MC 1.21.x, Velocity + Paper.
    ├─ trace l'état visible du client : entités, chunks, effets de potion self, abilities
    ├─ à l'arrivée : le teleport PASSE (handshake intact) + GEL EN VOL injecté
    │  (le client flotte sur place → pas de chute ni de traversée pendant le chargement)
-   ├─ quand le chunk d'arrivée arrive (ou timeout 3 s) : restaure les vraies abilities,
+   ├─ quand le chunk d'arrivée arrive (ou timeout) : restaure les vraies abilities,
    │  supprime les fantômes (entités/chunks/effets + metadata de particules), resync le
    │  gamemode, signale à l'agent de terminer sa grâce (canal coord)
-   └─ SWAP d'entity-id dans les deux sens (les paquets self atteignent le client ;
-      collisions inverses protégées)
+   ├─ **rewrite directionnel d'entity-id** : serveur→client réécrit backendId→clientId ;
+   │  client→serveur réécrit clientId→backendId (pas de swap sur les autres entités)
+   └─ **garde timeout** : configurable (défaut 5 s) ; au timeout envoie correction position
+      aux coords absolues d'arrivée + garde le vol ; étend la garde jusqu'à l'arrivée du chunk
 
 [Agent backend]  backend-agent/  (sur CHAQUE backend, + packetevents-spigot)
-   ├─ fall-guard : annule les dégâts FALL/SUFFOCATION pendant une grâce de 3 s
+   ├─ fall-guard : annule les dégâts FALL/SUFFOCATION pendant une grâce de **1 s** (était 3 s)
    └─ allowFlight temporaire pendant la grâce (sinon le gel ferait kick « Flying is
       not enabled »), révoqué instantanément au message unfreeze du proxy
 ```
@@ -73,6 +77,7 @@ moins invasif possible.
 | Skip config | `-Dvelocity.seamlessSwitch=false` pour désactiver | ON |
 | Mode Respawn (repli robuste, bref flash) | `-Dvelocity.seamlessRespawn=true` | OFF (= zéro écran) |
 | Coupe-circuit / debug du plugin proxy | `plugins/instanttransfer/config.properties` | activé |
+| **Timeout garde (ms)** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
 | Logs verbeux de l'agent ([DIAG-BACKEND], [COORD], [fall-guard]) | `plugins/InstantTransferAgent/config.yml` → `debug` | true |
 
 ## 5. Audit de couverture — « tout ce que JoinGame/Respawn resetait pour nous »
@@ -93,13 +98,12 @@ moins invasif possible.
 | Météo fantôme (pluie de l'ancien serveur) | tracking météo CHANGE_GAME_STATE → END_RAINING + niveaux pluie/orage à zéro à la release si le nouveau serveur n'a rien envoyé | ✅ |
 | GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |
 | Entrée tab-list du joueur lui-même (le client met en cache son objet PlayerInfo dans l'entité joueur ; un cycle remove/re-add orpheline le cache → le noclip spectateur casse, isSpectator/isCreative lisent un gamemode périmé) | UUID du joueur filtré des PLAYER_INFO_REMOVE + re-ADD rétrogradés en updates sur l'entrée survivante | ✅ |
-| Dimension différente entre serveurs | — | ❌ non supporté (fallback Respawn auto à implémenter) |
+| Dimension différente entre serveurs | **Fallback auto vers Respawn KEEP_ALL_DATA** (patch trace la dim client ; si dim backend ≠ dim client, envoie Respawn au lieu du zéro-écran) | ✅ |
 
 ## 6. Travail restant
 
-1. La ligne ❌ de l'audit ci-dessus (fallback cross-dimension).
-2. Plage de versions élargie (développé et testé contre 1.21.x), puis BungeeCord.
-3. Note de déploiement : chaque switch renvoie toute la view distance du joueur (~400 paquets de
+1. Plage de versions élargie (développé et testé contre 1.21.x), puis BungeeCord.
+2. Note de déploiement : chaque switch renvoie toute la view distance du joueur (~400 paquets de
    chunks) ; dimensionner le heap des backends en conséquence (≥ 2 Go recommandé) — un heap trop
    petit se manifeste par des stalls GC (« Can't keep up! ») puis un OutOfMemoryError pendant les
    sauvegardes de chunks.

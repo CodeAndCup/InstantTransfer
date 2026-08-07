@@ -29,6 +29,10 @@ public final class PluginConfig {
     /** Verbose per-packet logging. Handy for the first tests; turn off in production. */
     private boolean debug = true;
 
+    /** Timeout (ms) for the arrival guard. If the arrival chunk doesn't arrive within this time,
+     *  a position correction is sent (if absolute coords known) instead of brutally unfreezing. */
+    private int guardTimeoutMs = 5000;
+
     private PluginConfig() {
     }
 
@@ -44,6 +48,10 @@ public final class PluginConfig {
         return debug;
     }
 
+    public int guardTimeoutMs() {
+        return guardTimeoutMs;
+    }
+
     public static PluginConfig load(Path dataDirectory, Logger logger) {
         PluginConfig config = new PluginConfig();
         try {
@@ -57,10 +65,12 @@ public final class PluginConfig {
                 config.seamlessEnabled = parseBool(props, "seamless-enabled", config.seamlessEnabled);
                 config.requireSameDimension = parseBool(props, "require-same-dimension", config.requireSameDimension);
                 config.debug = parseBool(props, "debug", config.debug);
+                config.guardTimeoutMs = parseInt(props, "guard-timeout-ms", config.guardTimeoutMs);
             } else {
                 props.setProperty("seamless-enabled", Boolean.toString(config.seamlessEnabled));
                 props.setProperty("require-same-dimension", Boolean.toString(config.requireSameDimension));
                 props.setProperty("debug", Boolean.toString(config.debug));
+                props.setProperty("guard-timeout-ms", Integer.toString(config.guardTimeoutMs));
                 try (OutputStream out = Files.newOutputStream(file)) {
                     props.store(out, "InstantTransfer configuration");
                 }
@@ -75,5 +85,17 @@ public final class PluginConfig {
     private static boolean parseBool(Properties props, String key, boolean def) {
         String raw = props.getProperty(key);
         return raw == null ? def : Boolean.parseBoolean(raw.trim());
+    }
+
+    private static int parseInt(Properties props, String key, int def) {
+        String raw = props.getProperty(key);
+        if (raw == null) {
+            return def;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return def;
+        }
     }
 }

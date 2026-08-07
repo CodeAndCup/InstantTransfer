@@ -92,38 +92,38 @@ public final class EntityIdRemapper implements PacketListener {
 
             if (type == PacketType.Play.Server.ENTITY_STATUS) {
                 WrapperPlayServerEntityStatus w = new WrapperPlayServerEntityStatus(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_VELOCITY) {
                 WrapperPlayServerEntityVelocity w = new WrapperPlayServerEntityVelocity(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_EFFECT) {
                 WrapperPlayServerEntityEffect w = new WrapperPlayServerEntityEffect(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.REMOVE_ENTITY_EFFECT) {
                 WrapperPlayServerRemoveEntityEffect w = new WrapperPlayServerRemoveEntityEffect(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.UPDATE_ATTRIBUTES) {
                 WrapperPlayServerUpdateAttributes w = new WrapperPlayServerUpdateAttributes(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.HURT_ANIMATION) {
                 WrapperPlayServerHurtAnimation w = new WrapperPlayServerHurtAnimation(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.DAMAGE_EVENT) {
                 WrapperPlayServerDamageEvent w = new WrapperPlayServerDamageEvent(event);
-                boolean changed = swapInto(w.getEntityId(), w::setEntityId, state);
+                boolean changed = rewriteBackendToClient(w.getEntityId(), w::setEntityId, state);
                 // Source cause/direct are encoded as (entity id + 1); 0 means "none".
                 if (w.getSourceCauseId() > 0) {
-                    changed |= swapInto(w.getSourceCauseId() - 1,
+                    changed |= rewriteBackendToClient(w.getSourceCauseId() - 1,
                             id -> w.setSourceCauseId(id + 1), state);
                 }
                 if (w.getSourceDirectId() > 0) {
-                    changed |= swapInto(w.getSourceDirectId() - 1,
+                    changed |= rewriteBackendToClient(w.getSourceDirectId() - 1,
                             id -> w.setSourceDirectId(id + 1), state);
                 }
                 if (changed) {
@@ -132,80 +132,75 @@ public final class EntityIdRemapper implements PacketListener {
 
             } else if (type == PacketType.Play.Server.ENTITY_ANIMATION) {
                 WrapperPlayServerEntityAnimation w = new WrapperPlayServerEntityAnimation(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_METADATA) {
                 WrapperPlayServerEntityMetadata w = new WrapperPlayServerEntityMetadata(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
                 WrapperPlayServerEntityEquipment w = new WrapperPlayServerEntityEquipment(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.SET_PASSENGERS) {
                 WrapperPlayServerSetPassengers w = new WrapperPlayServerSetPassengers(event);
-                boolean changed = swapInto(w.getEntityId(), w::setEntityId, state);
+                boolean changed = rewriteBackendToClient(w.getEntityId(), w::setEntityId, state);
                 int[] passengers = w.getPassengers();
-                boolean arrayChanged = false;
                 for (int i = 0; i < passengers.length; i++) {
-                    int swapped = state.swapEntityId(passengers[i]);
-                    if (swapped != passengers[i]) {
-                        passengers[i] = swapped;
-                        arrayChanged = true;
+                    if (passengers[i] == state.backendEntityId()) {
+                        passengers[i] = state.clientEntityId();
+                        changed = true;
                     }
                 }
-                if (arrayChanged) {
+                if (changed) {
                     w.setPassengers(passengers);
-                }
-                if (changed || arrayChanged) {
                     event.markForReEncode(true);
                 }
 
             } else if (type == PacketType.Play.Server.ATTACH_ENTITY) {
                 WrapperPlayServerAttachEntity w = new WrapperPlayServerAttachEntity(event);
-                boolean changed = swapInto(w.getAttachedId(), w::setAttachedId, state);
-                changed |= swapInto(w.getHoldingId(), w::setHoldingId, state);
+                boolean changed = rewriteBackendToClient(w.getAttachedId(), w::setAttachedId, state);
+                changed |= rewriteBackendToClient(w.getHoldingId(), w::setHoldingId, state);
                 if (changed) {
                     event.markForReEncode(true);
                 }
 
             } else if (type == PacketType.Play.Server.ENTITY_TELEPORT) {
                 WrapperPlayServerEntityTeleport w = new WrapperPlayServerEntityTeleport(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_POSITION_SYNC) {
                 WrapperPlayServerEntityPositionSync w = new WrapperPlayServerEntityPositionSync(event);
-                remap(event, w.getId(), w::setId, state);
+                remapSend(event, w.getId(), w::setId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK) {
                 WrapperPlayServerEntityHeadLook w = new WrapperPlayServerEntityHeadLook(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_ROTATION) {
                 WrapperPlayServerEntityRotation w = new WrapperPlayServerEntityRotation(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE) {
                 WrapperPlayServerEntityRelativeMove w = new WrapperPlayServerEntityRelativeMove(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION) {
                 WrapperPlayServerEntityRelativeMoveAndRotation w =
                         new WrapperPlayServerEntityRelativeMoveAndRotation(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.SPAWN_ENTITY) {
                 WrapperPlayServerSpawnEntity w = new WrapperPlayServerSpawnEntity(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.DESTROY_ENTITIES) {
                 WrapperPlayServerDestroyEntities w = new WrapperPlayServerDestroyEntities(event);
                 int[] ids = w.getEntityIds();
                 boolean changed = false;
                 for (int i = 0; i < ids.length; i++) {
-                    int swapped = state.swapEntityId(ids[i]);
-                    if (swapped != ids[i]) {
-                        ids[i] = swapped;
+                    if (ids[i] == state.backendEntityId()) {
+                        ids[i] = state.clientEntityId();
                         changed = true;
                     }
                 }
@@ -216,7 +211,7 @@ public final class EntityIdRemapper implements PacketListener {
 
             } else if (type == PacketType.Play.Server.CAMERA) {
                 WrapperPlayServerCamera w = new WrapperPlayServerCamera(event);
-                remap(event, w.getCameraId(), w::setCameraId, state);
+                remapSend(event, w.getCameraId(), w::setCameraId, state);
             }
         } catch (Exception e) {
             if (config.debug()) {
@@ -240,11 +235,11 @@ public final class EntityIdRemapper implements PacketListener {
         try {
             if (type == PacketType.Play.Client.INTERACT_ENTITY) {
                 WrapperPlayClientInteractEntity w = new WrapperPlayClientInteractEntity(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapReceive(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Client.ENTITY_ACTION) {
                 WrapperPlayClientEntityAction w = new WrapperPlayClientEntityAction(event);
-                remap(event, w.getEntityId(), w::setEntityId, state);
+                remapReceive(event, w.getEntityId(), w::setEntityId, state);
             }
         } catch (Exception e) {
             if (config.debug()) {
@@ -287,19 +282,34 @@ public final class EntityIdRemapper implements PacketListener {
         void set(int id);
     }
 
-    /** Swap the id if it belongs to the client/backend pair; returns whether a change was made. */
-    private boolean swapInto(int id, IdSetter setter, SwitchState state) {
-        int swapped = state.swapEntityId(id);
-        if (swapped != id) {
-            setter.set(swapped);
+    /** Rewrite backendEntityId -> clientEntityId (server->client direction only). */
+    private boolean rewriteBackendToClient(int id, IdSetter setter, SwitchState state) {
+        if (id == state.backendEntityId()) {
+            setter.set(state.clientEntityId());
             return true;
         }
         return false;
     }
 
-    private void remap(com.github.retrooper.packetevents.event.ProtocolPacketEvent event,
-                       int id, IdSetter setter, SwitchState state) {
-        if (swapInto(id, setter, state)) {
+    /** Rewrite clientEntityId -> backendEntityId (client->server direction only). */
+    private boolean rewriteClientToBackend(int id, IdSetter setter, SwitchState state) {
+        if (id == state.clientEntityId()) {
+            setter.set(state.backendEntityId());
+            return true;
+        }
+        return false;
+    }
+
+    private void remapSend(com.github.retrooper.packetevents.event.PacketSendEvent event,
+                           int id, IdSetter setter, SwitchState state) {
+        if (rewriteBackendToClient(id, setter, state)) {
+            event.markForReEncode(true);
+        }
+    }
+
+    private void remapReceive(com.github.retrooper.packetevents.event.PacketReceiveEvent event,
+                              int id, IdSetter setter, SwitchState state) {
+        if (rewriteClientToBackend(id, setter, state)) {
             event.markForReEncode(true);
         }
     }

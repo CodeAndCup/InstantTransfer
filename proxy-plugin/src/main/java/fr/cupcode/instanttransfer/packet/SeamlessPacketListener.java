@@ -79,9 +79,6 @@ import java.util.UUID;
  */
 public final class SeamlessPacketListener implements PacketListener {
 
-    /** Safety net: release the freeze this long after the arrival teleport even without the chunk. */
-    private static final long GUARD_TIMEOUT_MS = 3000L;
-
     /** PLAYER_POSITION_AND_LOOK relative-flag bits for X and Z. */
     private static final byte REL_X = 0x01;
     private static final byte REL_Z = 0x04;
@@ -300,10 +297,11 @@ public final class SeamlessPacketListener implements PacketListener {
                 return;
             }
 
-            // Safety net: never leave the player frozen/ghosted if the target chunk never matches.
+            // Safety net: if the arrival chunk doesn't arrive in time, send a position correction
+            // to the known arrival position and keep flight enabled (don't unfreeze brutally).
             if (state.guardActive() && state.teleportSeen()
-                    && System.currentTimeMillis() - state.guardArmedAt() > GUARD_TIMEOUT_MS) {
-                release(user, state, "timeout");
+                    && System.currentTimeMillis() - state.guardArmedAt() > config.guardTimeoutMs()) {
+                handleTimeout(user, state);
             }
         } catch (Exception e) {
             if (config.debug()) {
@@ -383,6 +381,9 @@ public final class SeamlessPacketListener implements PacketListener {
 
         byte mask = w.getRelativeMask();
         boolean absolute = (mask & (REL_X | REL_Z)) == 0;
+
+        // Store arrival position for potential timeout correction (only if absolute coords)
+        state.arrivalPosition(w.getX(), w.getY(), w.getZ(), w.getYaw(), w.getPitch(), absolute);
         if (absolute) {
             int cx = (int) Math.floor(w.getX()) >> 4;
             int cz = (int) Math.floor(w.getZ()) >> 4;
@@ -552,6 +553,48 @@ public final class SeamlessPacketListener implements PacketListener {
                 objectiveCount, teamCount,
                 ghostWeather ? ", cleared ghost weather" : "",
                 ghostWindow != -1 ? ", closed ghost GUI #" + ghostWindow : "");
+    }
+
+    /**
+     * Handle guard timeout: the arrival chunk didn't arrive in time.
+     * If we have an absolute arrival position, send a position correction and keep flight enabled.
+     * If relative (unknown absolute position), just extend the timeout — don't guess the position.
+     */
+    private void handleTimeout(User user, SwitchState state) {
+        if (!state.arrivalPositionKnown()) {
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] timeout but no arrival position known for {}, extending guard",
+                        user.getName());
+            }
+            // No position known, just extend timeout
+            state.markTeleportSeen(System.currentTimeMillis());
+            return;
+        }
+        if (!state.arrivalPositionAbsolute()) {
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] timeout but arrival position was relative for {}, extending guard (no correction)",
+                        user.getName());
+            }
+            // Relative teleport: we don't know the absolute position, don't guess.
+            // Just extend the guard timeout and wait for the chunk.
+            state.markTeleportSeen(System.currentTimeMillis());
+            return;
+        }
+        // Absolute position known: send correction and keep flight enabled.
+        if (config.debug()) {
+            logger.info("[InstantTransfer] guard timeout for {} — sending position correction to ({},{},{}) and keeping flight",
+                    user.getName(), state.arrivalX(), state.arrivalY(), state.arrivalZ());
+        }
+        sendSuppressed(user, state, new WrapperPlayServerPlayerPositionAndLook(
+                state.arrivalX(), state.arrivalY(), state.arrivalZ(),
+                state.arrivalYaw(), state.arrivalPitch(),
+                (byte) 0, // absolute coordinates (no relative flags)
+                0, // teleport ID
+                true)); // onGround
+        // Restart the guard timer from now — we'll wait longer for the chunk.
+        state.markTeleportSeen(System.currentTimeMillis());
+        // Do NOT call finishGuard() or unfreeze — flight stays on, guard stays active.
+        // The normal chunk-arrival path in onPacketSend (CHUNK_DATA handling) will call release().
     }
 
     /** Send a packet of ours without re-triggering this listener (see class javadoc). */
