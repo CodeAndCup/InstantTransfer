@@ -27,12 +27,12 @@ Three cooperating components (all are required):
 
 | Component | Where | Role |
 |---|---|---|
-| `velocity-patch/` | replaces your Velocity jar | Skips the client CONFIGURATION phase on switches (absorbs the backend's config proxy-side via a known-packs echo) and sends **neither JoinGame nor Respawn** — the client never leaves PLAY. Announces entity-id pairs to the plugin. |
-| `proxy-plugin/` | proxy `plugins/` (+ [packetevents-velocity](https://github.com/retrooper/packetevents)) | Tracks what the client sees (chunks, entities, effects, abilities). On arrival: lets the teleport pass, **freezes the player with client-side flight** until the landing chunk is delivered (no falling through unloaded ground), then removes the previous server's ghosts (entities, chunks, potion effects) and **swaps entity ids** (Velocity issue #251: op level / F3+F4, knockback, effects, attributes…). |
+| `velocity-patch/` | replaces your Velocity jar | Skips the client CONFIGURATION phase on switches (absorbs the backend's config proxy-side via a known-packs echo) and sends **neither JoinGame nor Respawn** — the client never leaves PLAY. Announces entity-id pairs + gamemode to the plugin. **Tracks client dimension; auto-fallbacks to Respawn KEEP_ALL_DATA if backend dimension differs** (brief flash, safe). |
+| `proxy-plugin/` | proxy `plugins/` (+ [packetevents-velocity](https://github.com/retrooper/packetevents)) | Tracks what the client sees (chunks, entities, effects, abilities). On arrival: lets the teleport pass, **freezes the player with client-side flight** until the landing chunk is delivered (no falling through unloaded ground), then removes the previous server's ghosts (entities, chunks, potion effects) and **rewrites entity ids directionally** (backendId→clientId server→client, clientId→backendId client→server). **Timeout guard: on chunk delay sends position correction + keeps flight** (configurable, default 5 s). |
 | `backend-agent/` | every backend's `plugins/` (+ [packetevents-spigot](https://github.com/retrooper/packetevents)) | Arrival grace: cancels fall damage, temporarily allows flight server-side (so the freeze can never kick), revokes it the instant the proxy signals the arrival is complete (plugin-message channel). |
 
 Requirements for a seamless switch: backends on the **same Minecraft version** with **identical
-registries/datapacks**, and (for now) the **same dimension**.
+registries/datapacks**. Cross-dimension is now supported via auto-fallback to Respawn (brief flash).
 
 ## Install
 
@@ -53,6 +53,7 @@ registries/datapacks**, and (for now) the **same dimension**.
 | Disable everything (vanilla Velocity behavior) | `-Dvelocity.seamlessSwitch=false` | enabled |
 | Fallback mode: clean same-dimension Respawn (brief flash, no companion plugins needed) | `-Dvelocity.seamlessRespawn=true` | off (zero-screen) |
 | Proxy plugin master switch, debug logs | `plugins/instanttransfer/config.properties` | enabled |
+| **Guard timeout (ms) — on timeout sends position correction + keeps flight** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
 | Backend agent verbose logs | `plugins/InstantTransferAgent/config.yml` → `debug` | true |
 
 ## Repository layout
@@ -66,8 +67,9 @@ docs/EXPERIMENTAL.md   R&D log: every approach tried, what failed and why, cover
 
 ## Status & known limits
 
-- ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs/cooldowns/scoreboards, entity-id remap, gamemode resync — validated live on 1.21.x (Velocity dev/3.0.0, Paper 1.21.4).
-- ⚠️ Same-dimension switches only; identical registries required (different datapacks → do not use).
+- ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs/cooldowns/scoreboards, **directional** entity-id remap, gamemode resync — validated live on 1.21.x (Velocity 3.4.0, Paper 1.21.4).
+- ✅ **Cross-dimension supported** via auto-fallback to Respawn KEEP_ALL_DATA (brief loading flash, safe).
+- ⚠️ Identical registries/datapacks required between backends (different datapacks → do not use).
 - ⚠️ A player moving during the ~300 ms handshake may get a harmless server-side position correction (`moved too quickly` in logs).
 
 Inspired by a private implementation showcased by Lodjo28 (no code published); this is an

@@ -28,12 +28,12 @@ Trois composants qui coopèrent (les trois sont nécessaires) :
 
 | Composant | Où | Rôle |
 |---|---|---|
-| `velocity-patch/` | remplace le jar Velocity | Saute la phase CONFIGURATION client au switch (la config du backend est absorbée côté proxy via un écho known-packs) et n'envoie **ni JoinGame ni Respawn** — le client ne quitte jamais l'état PLAY. Annonce les paires d'entity-id au plugin. |
-| `proxy-plugin/` | `plugins/` du proxy (+ [packetevents-velocity](https://github.com/retrooper/packetevents)) | Trace ce que le client voit (chunks, entités, effets, abilities). À l'arrivée : laisse passer le teleport, **gèle le joueur en vol client-side** jusqu'à la livraison du chunk d'arrivée (pas de traversée du sol), puis supprime les fantômes de l'ancien serveur (entités, chunks, effets de potion) et **échange les entity-ids** (issue Velocity #251 : niveau OP / F3+F4, knockback, effets, attributs…). |
+| `velocity-patch/` | remplace le jar Velocity | Saute la phase CONFIGURATION client au switch (la config du backend est absorbée côté proxy via un écho known-packs) et n'envoie **ni JoinGame ni Respawn** — le client ne quitte jamais l'état PLAY. Annonce les paires d'entity-id + gamemode au plugin. **Trace la dimension client ; fallback auto vers Respawn KEEP_ALL_DATA si la dimension du backend diffère** (bref flash, safe). |
+| `proxy-plugin/` | `plugins/` du proxy (+ [packetevents-velocity](https://github.com/retrooper/packetevents)) | Trace ce que le client voit (chunks, entités, effets, abilities). À l'arrivée : laisse passer le teleport, **gèle le joueur en vol client-side** jusqu'à la livraison du chunk d'arrivée (pas de traversée du sol), puis supprime les fantômes de l'ancien serveur (entités, chunks, effets de potion) et **réécrit les entity-ids directionnellement** (backendId→clientId serveur→client, clientId→backendId client→serveur). **Garde timeout : en cas de retard du chunk envoie correction de position + garde le vol** (configurable, défaut 5 s). |
 | `backend-agent/` | `plugins/` de chaque backend (+ [packetevents-spigot](https://github.com/retrooper/packetevents)) | Grâce d'arrivée : annule les dégâts de chute, autorise temporairement le vol côté serveur (le gel ne peut jamais kick), et le révoque dès que le proxy signale la fin de l'arrivée (canal plugin-message). |
 
 Conditions pour un switch seamless : backends sur la **même version de Minecraft** avec des
-**registres/datapacks identiques**, et (pour l'instant) la **même dimension**.
+**registres/datapacks identiques**. Le cross-dimension est maintenant supporté via fallback auto vers Respawn (bref flash de chargement).
 
 ## Installation
 
@@ -54,6 +54,7 @@ Conditions pour un switch seamless : backends sur la **même version de Minecraf
 | Tout désactiver (comportement Velocity vanilla) | `-Dvelocity.seamlessSwitch=false` | activé |
 | Mode repli : Respawn même-dimension propre (bref flash, sans plugins compagnons) | `-Dvelocity.seamlessRespawn=true` | off (= zéro-écran) |
 | Coupe-circuit du plugin proxy, logs debug | `plugins/instanttransfer/config.properties` | activé |
+| **Timeout garde (ms) — en cas de timeout envoie correction position + garde vol** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
 | Logs verbeux de l'agent backend | `plugins/InstantTransferAgent/config.yml` → `debug` | true |
 
 ## Structure du dépôt
@@ -68,8 +69,9 @@ docs/EXPERIMENTAL_FR.md   Journal de R&D : approches essayées, échecs et cause
 ## État & limites connues
 
 - ✅ Zéro écran, pas de dégâts de chute, pas d'entités/chunks/effets/météo/GUI/cooldowns/scoreboards
-  fantômes, remap entity-id, resync du gamemode — validé en live sur 1.21.x (Velocity dev/3.0.0, Paper 1.21.4).
-- ⚠️ Switchs même-dimension uniquement ; registres identiques requis (datapacks différents → ne pas utiliser).
+  fantômes, remap entity-id **directionnel**, resync du gamemode — validé en live sur 1.21.x (Velocity 3.4.0, Paper 1.21.4).
+- ✅ **Cross-dimension supporté** via fallback auto vers Respawn KEEP_ALL_DATA (bref flash de chargement, safe).
+- ⚠️ Registres/datapacks identiques requis entre backends (datapacks différents → ne pas utiliser).
 - ⚠️ Un joueur qui bouge pendant le handshake (~300 ms) peut recevoir une correction de position bénigne (`moved too quickly` dans les logs).
 
 Inspiré d'une implémentation privée montrée par Lodjo28 (code non publié) ; ceci est une
