@@ -75,7 +75,16 @@ public final class SwitchManager {
         // Check if this is an instant transfer request (via /transfer command or API)
         UUID uuid = player.getUniqueId();
         if (!plugin.consumeInstantTransferRequest(uuid)) {
+            if (config.debug()) {
+                logger.debug("[InstantTransfer] Normal server switch for {} (no instant transfer flag)", player.getUsername());
+            }
             return; // Normal /server switch → let Velocity handle it normally
+        }
+
+        // Verify the target server matches what was requested (extra safety)
+        RegisteredServer requestedTarget = event.getOriginalServer();
+        if (config.debug()) {
+            logger.debug("[InstantTransfer] Instant transfer armed for {} to {}", player.getUsername(), requestedTarget.getServerInfo().getName());
         }
 
         // Store the previous server for transfer events
@@ -95,12 +104,12 @@ public final class SwitchManager {
         plugin.fireTransferStart(
                 player,
                 previousServer,
-                event.getOriginalServer()
+                requestedTarget
         );
 
         if (config.debug()) {
             String from = currentConnection.getServerInfo().getName();
-            String to = event.getOriginalServer().getServerInfo().getName();
+            String to = requestedTarget.getServerInfo().getName();
             logger.info("[InstantTransfer] switch armed for {}: {} -> {} (snapshot {} entities, {} chunks)",
                     player.getUsername(), from, to,
                     state.ghostEntities().size(), state.ghostChunks().size());

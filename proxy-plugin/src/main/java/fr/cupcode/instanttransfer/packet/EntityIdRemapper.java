@@ -191,9 +191,9 @@ public final class EntityIdRemapper implements PacketListener {
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.SPAWN_ENTITY) {
-                WrapperPlayServerSpawnEntity w = new WrapperPlayServerSpawnEntity(event);
-                remapSend(event, w.getEntityId(), w::setEntityId, state);
-
+                // Do NOT rewrite SPAWN_ENTITY - backend assigns new entity IDs for mobs/items/etc.
+                // The player entity is never spawned via SPAWN_ENTITY (JoinGame is suppressed).
+                // Rewriting would incorrectly change mob/item entity IDs if they collide with backendEntityId.
             } else if (type == PacketType.Play.Server.DESTROY_ENTITIES) {
                 WrapperPlayServerDestroyEntities w = new WrapperPlayServerDestroyEntities(event);
                 int[] ids = w.getEntityIds();

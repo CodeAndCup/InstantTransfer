@@ -128,6 +128,14 @@ public final class InstantTransfer implements InstantTransferAPI {
         // Mark as instant transfer requested
         instantTransferRequested.put(uuid, true);
 
+        // Safety timeout: clear flag if transfer doesn't start within 10 seconds
+        proxy.getScheduler().buildTask(this, () -> {
+            instantTransferRequested.remove(uuid);
+            if (config.debug()) {
+                logger.debug("[InstantTransfer] Cleared stale instant transfer flag for {}", player.getUsername());
+            }
+        }).delay(java.time.Duration.ofSeconds(10)).schedule();
+
         // Trigger the transfer by connecting the player to the target server
         player.createConnectionRequest(target).connect();
 

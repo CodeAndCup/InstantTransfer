@@ -6,43 +6,54 @@
 
     <parent>
         <groupId>fr.cupcode</groupId>
-        <artifactId>instanttransfer-parent</artifactId>
+        <artifactId>instanttransfer-backend-agent</artifactId>
         <version>0.1.0</version>
-        <relativePath>../../pom.xml</relativePath>
+        <relativePath>..</relativePath>
     </parent>
 
-    <artifactId>instanttransfer-agent-spigot</artifactId>
-    <name>InstantTransferAgent Spigot</name>
-    <description>Spigot-specific backend agent module.</description>
+    <artifactId>instanttransfer-agent</artifactId>
+    <name>InstantTransferAgent</name>
+    <description>Backend-side agent for coordinated seamless-transfer system (Spigot/Paper)</description>
 
     <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.release>21</maven.compiler.release>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>fr.cupcode</groupId>
-            <artifactId>instanttransfer-agent-core</artifactId>
-            <version>${project.version}</version>
-            <scope>compile</scope>
-        </dependency>
-        <!-- Spigot API -->
-        <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot-api</artifactId>
-            <version>1.21.8-R0.1-SNAPSHOT</version>
+            <version>1.21-R0.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.retrooper</groupId>
+            <artifactId>packetevents-spigot</artifactId>
+            <version>2.13.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.0.0-jre</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
 
     <build>
-        <finalName>InstantTransferAgent-Spigot-${project.version}</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
+                <configuration>
+                    <source>21</source>
+                    <target>21</target>
+                    <encoding>UTF-8</encoding>
+                    <parameters>true</parameters>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -60,9 +71,6 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>fr.cupcode.instanttransfer.agent.AgentPlugin</mainClass>
                                 </transformer>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
-                                    <resource>META-INF/services/org.bukkit.plugin.Plugin</resource>
-                                </transformer>
                             </transformers>
                             <filters>
                                 <filter>
@@ -72,10 +80,26 @@
                                     </excludes>
                                 </filter>
                             </filters>
+                            <relocations>
+                                <relocation>
+                                    <pattern>com.google.common</pattern>
+                                    <shadedPattern>fr.cupcode.instanttransfer.agent.shaded.com.google.common</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.github.retrooper.packetevents</pattern>
+                                    <shadedPattern>fr.cupcode.instanttransfer.agent.shaded.packetevents</shadedPattern>
+                                </relocation>
+                            </relocations>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
     </build>
 </project>

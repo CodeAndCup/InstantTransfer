@@ -9,12 +9,10 @@
     <version>0.1.0</version>
     <packaging>pom</packaging>
 
-    <name>InstantTransfer Backend Agent (parent)</name>
-    <description>Multi-platform backend agent modules.</description>
+    <name>InstantTransfer Backend Agent</name>
+    <description>Backend-side agent for coordinated seamless-transfer system (Spigot/Paper)</description>
 
     <modules>
-        <module>core</module>
-        <module>paper</module>
         <module>spigot</module>
     </modules>
 
@@ -25,24 +23,18 @@
 
     <repositories>
         <repository>
+            <id>codemc-releases</id>
+            <url>https://repo.codemc.io/repository/maven-releases/</url>
+        </repository>
+        <repository>
+            <id>codemc-snapshots</id>
+            <url>https://repo.codemc.io/repository/maven-snapshots/</url>
+        </repository>
+        <repository>
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
-        <repository>
-            <id>codemc</id>
-            <url>https://repo.codemc.io/repository/maven-releases/</url>
-        </repository>
     </repositories>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>fr.cupcode</groupId>
-                <artifactId>instanttransfer-agent-core</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <build>
         <pluginManagement>
