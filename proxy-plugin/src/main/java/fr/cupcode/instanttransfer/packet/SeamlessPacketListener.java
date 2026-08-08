@@ -1,5 +1,6 @@
 package fr.cupcode.instanttransfer.packet;
 
+import fr.cupcode.instanttransfer.InstantTransfer;
 import fr.cupcode.instanttransfer.config.PluginConfig;
 import fr.cupcode.instanttransfer.coord.CoordManager;
 import fr.cupcode.instanttransfer.switching.SwitchManager;
@@ -35,6 +36,8 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
+import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.proxy.server.RegisteredServer;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -87,13 +90,15 @@ public final class SeamlessPacketListener implements PacketListener {
     private final CoordManager coord;
     private final PluginConfig config;
     private final Logger logger;
+    private final InstantTransfer plugin;
 
     public SeamlessPacketListener(SwitchManager manager, CoordManager coord,
-                                  PluginConfig config, Logger logger) {
+                                  PluginConfig config, Logger logger, InstantTransfer plugin) {
         this.manager = manager;
         this.coord = coord;
         this.config = config;
         this.logger = logger;
+        this.plugin = plugin;
     }
 
     @Override
@@ -553,6 +558,26 @@ public final class SeamlessPacketListener implements PacketListener {
                 objectiveCount, teamCount,
                 ghostWeather ? ", cleared ghost weather" : "",
                 ghostWindow != -1 ? ", closed ghost GUI #" + ghostWindow : "");
+
+        // Fire transfer complete event
+        UUID uuid = user.getUUID();
+        Player player = plugin.getProxy().getPlayer(uuid).orElse(null);
+        RegisteredServer previousServer = manager.getPreviousServer(uuid);
+        RegisteredServer currentServer = manager.getCurrentServer(uuid);
+        if (player != null) {
+            plugin.fireTransferComplete(
+                    player,
+                    previousServer,
+                    currentServer,
+                    true,
+                    reason
+            );
+        }
+
+        // Notify backend of arrival
+        if (previousServer != null) {
+            coord.sendArrival(uuid, previousServer.getServerInfo().getName());
+        }
     }
 
     /**
@@ -568,6 +593,7 @@ public final class SeamlessPacketListener implements PacketListener {
             }
             // No position known, just extend timeout
             state.markTeleportSeen(System.currentTimeMillis());
+            fireTransferTimeout(user);
             return;
         }
         if (!state.arrivalPositionAbsolute()) {
@@ -578,6 +604,7 @@ public final class SeamlessPacketListener implements PacketListener {
             // Relative teleport: we don't know the absolute position, don't guess.
             // Just extend the guard timeout and wait for the chunk.
             state.markTeleportSeen(System.currentTimeMillis());
+            fireTransferTimeout(user);
             return;
         }
         // Absolute position known: send correction and keep flight enabled.
@@ -593,8 +620,22 @@ public final class SeamlessPacketListener implements PacketListener {
                 true)); // onGround
         // Restart the guard timer from now — we'll wait longer for the chunk.
         state.markTeleportSeen(System.currentTimeMillis());
+        fireTransferTimeout(user);
         // Do NOT call finishGuard() or unfreeze — flight stays on, guard stays active.
         // The normal chunk-arrival path in onPacketSend (CHUNK_DATA handling) will call release().
+    }
+
+    private void fireTransferTimeout(User user) {
+        UUID uuid = user.getUUID();
+        Player player = plugin.getProxy().getPlayer(uuid).orElse(null);
+        if (player == null) {
+            return;
+        }
+        plugin.fireTransferTimeout(
+                player,
+                manager.getPreviousServer(uuid),
+                manager.getCurrentServer(uuid)
+        );
     }
 
     /** Send a packet of ours without re-triggering this listener (see class javadoc). */

@@ -1,5 +1,9 @@
 package fr.cupcode.instanttransfer.agent;
 
+import fr.cupcode.instanttransfer.agent.api.InstantTransferAgentAPI;
+import fr.cupcode.instanttransfer.agent.api.InstantTransferAgentAPI.AgentListener;
+import fr.cupcode.instanttransfer.agent.api.InstantTransferAgentAPI.ArrivalEvent;
+import fr.cupcode.instanttransfer.agent.api.InstantTransferAgentAPI.FlightEvent;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import org.bukkit.GameMode;
@@ -13,22 +17,24 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.messaging.PluginMessageListener;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Backend agent for the coordinated seamless-transfer system.
  *
  * <ul>
  *   <li>packetevents listener logging the config-phase handshake from the server's side.</li>
- *   <li>The {@code instanttransfer:coord} plugin-messaging channel (proxy&lt;-&gt;backend backbone).</li>
+ *   <li>The {@code instanttransfer:coord} plugin-messaging channel (proxy<->backend backbone).</li>
  *   <li>Arrival fix: on a seamless switch the proxy sends no Respawn (to avoid the loading screen), so
  *       the client's fall distance is not reset and the player would take fall damage on arrival. We
  *       zero the fall distance on join and cancel fall damage for a short grace window.</li>
  * </ul>
  */
-public final class AgentPlugin extends JavaPlugin implements PluginMessageListener, Listener {
+public final class AgentPlugin extends JavaPlugin implements PluginMessageListener, Listener, InstantTransferAgentAPI {
 
     public static final String COORD_CHANNEL = "instanttransfer:coord";
 
@@ -42,6 +48,8 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
     /** Verbose logging ([DIAG-BACKEND] handshake dump, [COORD] messages, [fall-guard] details). */
     private boolean debug = true;
+
+    private final List<AgentListener> listeners = new CopyOnWriteArrayList<>();
 
     @Override
     public void onEnable() {
@@ -113,6 +121,9 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
             }, t);
         }
         getServer().getScheduler().runTaskLater(this, () -> fallGrace.remove(uuid), FALL_GRACE_TICKS);
+
+        // Fire arrival event for API listeners
+        firePlayerArrive(uuid, "unknown");
     }
 
     @EventHandler
@@ -147,6 +158,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
                 getLogger().info("[fall-guard] flight grace revoked for " + player.getName());
             }
         }
+        fireFlightRevoked(uuid, (int) FALL_GRACE_TICKS);
     }
 
     @Override
@@ -164,6 +176,98 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
                 getServer().getScheduler().runTask(this, () -> revokeFlightGrace(uuid));
             } catch (IllegalArgumentException e) {
                 getLogger().warning("[COORD] bad unfreeze payload: " + msg);
+            }
+        } else if (msg.startsWith("arrival:")) {
+            // Format: arrival:<uuid>:<fromServer>
+            String[] parts = msg.substring("arrival:".length()).split(":", 2);
+            if (parts.length == 2) {
+                try {
+                    UUID uuid = UUID.fromString(parts[0]);
+                    String fromServer = parts[1];
+                    // Grant arrival flight
+                    grantArrivalFlight(uuid, (int) FALL_GRACE_TICKS);
+                    // Fire arrival event
+                    firePlayerArrive(uuid, fromServer);
+                } catch (IllegalArgumentException e) {
+                    getLogger().warning("[COORD] bad arrival payload: " + msg + " - " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    // === API Implementation ===
+
+    @Override
+    public void onPlayerArrive(UUID playerId, String fromServer) {
+        firePlayerArrive(playerId, fromServer);
+    }
+
+    @Override
+    public void grantArrivalFlight(UUID playerId, int ticks) {
+        Player player = getServer().getPlayer(playerId);
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        if (player.getGameMode() != GameMode.CREATIVE && player.getGameMode() != GameMode.SPECTATOR
+                && !player.getAllowFlight()) {
+            player.setAllowFlight(true);
+            flightGrace.add(playerId);
+            if (debug) {
+                getLogger().info("[flight-guard] granted arrival flight for " + player.getName() + " (" + ticks + " ticks)");
+            }
+        }
+        fireFlightGranted(playerId, ticks);
+    }
+
+    @Override
+    public void revokeArrivalFlight(UUID playerId) {
+        revokeFlightGrace(playerId);
+    }
+
+    @Override
+    public boolean hasArrivalFlight(UUID playerId) {
+        return flightGrace.contains(playerId);
+    }
+
+    @Override
+    public void registerListener(AgentListener listener) {
+        listeners.add(listener);
+    }
+
+    @Override
+    public void unregisterListener(AgentListener listener) {
+        listeners.remove(listener);
+    }
+
+    private void firePlayerArrive(UUID playerId, String fromServer) {
+        ArrivalEvent event = new ArrivalEvent(playerId, fromServer);
+        for (AgentListener listener : listeners) {
+            try {
+                listener.onPlayerArrive(event);
+            } catch (Exception e) {
+                getLogger().warning("Error in agent listener: " + e.getMessage());
+            }
+        }
+    }
+
+    private void fireFlightGranted(UUID playerId, int ticks) {
+        FlightEvent event = new FlightEvent(playerId, ticks);
+        for (AgentListener listener : listeners) {
+            try {
+                listener.onFlightGranted(event);
+            } catch (Exception e) {
+                getLogger().warning("Error in agent listener: " + e.getMessage());
+            }
+        }
+    }
+
+    private void fireFlightRevoked(UUID playerId, int ticks) {
+        FlightEvent event = new FlightEvent(playerId, ticks);
+        for (AgentListener listener : listeners) {
+            try {
+                listener.onFlightRevoked(event);
+            } catch (Exception e) {
+                getLogger().warning("Error in agent listener: " + e.getMessage());
             }
         }
     }

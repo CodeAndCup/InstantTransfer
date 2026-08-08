@@ -1,10 +1,15 @@
 package fr.cupcode.instanttransfer.switching;
 
+import fr.cupcode.instanttransfer.InstantTransfer;
 import fr.cupcode.instanttransfer.config.PluginConfig;
+import fr.cupcode.instanttransfer.switching.SwitchState;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.proxy.server.RegisteredServer;
+import com.velocitypowered.api.proxy.ServerConnection;
+import com.velocitypowered.api.proxy.server.ServerInfo;
 import org.slf4j.Logger;
 
 import java.util.Map;
@@ -20,11 +25,14 @@ public final class SwitchManager {
 
     private final PluginConfig config;
     private final Logger logger;
+    private final InstantTransfer plugin;
     private final Map<UUID, SwitchState> states = new ConcurrentHashMap<>();
+    private final Map<UUID, RegisteredServer> previousServers = new ConcurrentHashMap<>();
 
-    public SwitchManager(PluginConfig config, Logger logger) {
+    public SwitchManager(PluginConfig config, Logger logger, InstantTransfer plugin) {
         this.config = config;
         this.logger = logger;
+        this.plugin = plugin;
     }
 
     public SwitchState getOrCreate(UUID uuid) {
@@ -33,6 +41,25 @@ public final class SwitchManager {
 
     public SwitchState get(UUID uuid) {
         return states.get(uuid);
+    }
+
+    public RegisteredServer getPreviousServer(UUID uuid) {
+        return previousServers.get(uuid);
+    }
+
+    public RegisteredServer getCurrentServer(UUID uuid) {
+        Player player = plugin.getProxy().getPlayer(uuid).orElse(null);
+        if (player != null) {
+            return player.getCurrentServer()
+                    .map(ServerConnection::getServerInfo)
+                    .flatMap(info -> plugin.getProxy().getServer(info.getName()))
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    private RegisteredServer toRegisteredServer(ServerInfo serverInfo) {
+        return plugin.getProxy().getServer(serverInfo.getName()).orElse(null);
     }
 
     @Subscribe
@@ -44,13 +71,35 @@ public final class SwitchManager {
         if (player.getCurrentServer().isEmpty()) {
             return; // initial join, not a switch
         }
-        SwitchState state = getOrCreate(player.getUniqueId());
+
+        // Check if this is an instant transfer request (via /transfer command or API)
+        UUID uuid = player.getUniqueId();
+        if (!plugin.consumeInstantTransferRequest(uuid)) {
+            return; // Normal /server switch → let Velocity handle it normally
+        }
+
+        // Store the previous server for transfer events
+        ServerConnection currentConnection = player.getCurrentServer().orElseThrow();
+        RegisteredServer previousServer = toRegisteredServer(currentConnection.getServerInfo());
+        if (previousServer != null) {
+            previousServers.put(uuid, previousServer);
+        }
+
+        SwitchState state = getOrCreate(uuid);
         // Snapshot the current (old server's) entities and chunks; they become ghosts after the switch.
         state.snapshotGhosts();
         // Arm the arrival guard: freeze on the arrival teleport, release on the landing chunk.
         state.armGuard(System.currentTimeMillis());
+
+        // Fire transfer start event
+        plugin.fireTransferStart(
+                player,
+                previousServer,
+                event.getOriginalServer()
+        );
+
         if (config.debug()) {
-            String from = player.getCurrentServer().map(s -> s.getServerInfo().getName()).orElse("?");
+            String from = currentConnection.getServerInfo().getName();
             String to = event.getOriginalServer().getServerInfo().getName();
             logger.info("[InstantTransfer] switch armed for {}: {} -> {} (snapshot {} entities, {} chunks)",
                     player.getUsername(), from, to,
@@ -61,5 +110,6 @@ public final class SwitchManager {
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
         states.remove(event.getPlayer().getUniqueId());
+        previousServers.remove(event.getPlayer().getUniqueId());
     }
 }
