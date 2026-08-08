@@ -1,10 +1,10 @@
 name: InstantTransferAgent
-version: 0.1.0
+version: ${project.version}
 main: fr.cupcode.instanttransfer.agent.AgentPlugin
 api-version: 1.21
-description: Backend-side agent for coordinated seamless-transfer system (Spigot)
+description: Backend-side agent for coordinated seamless-transfer system (Spigot/Paper)
 author: CupCode
-depend: [PacketEvents]
+depend: [packetevents]
 softdepend: []
 
 commands: {}

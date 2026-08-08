@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
- * Proxy side of the proxy&lt;-&gt;backend coordination channel.
+ * Proxy side of the proxy<->backend coordination channel.
  *
  * <p>Brick 1 (foundation): registers the {@code instanttransfer:coord} channel, sends a ping to the
  * destination backend right after a switch, and logs anything the backends send back. This proves the
@@ -55,6 +55,22 @@ public final class CoordManager {
             server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
             logger.info("[COORD] sent unfreeze to {} for {}",
                     server.getServerInfo().getName(), uuid);
+        });
+    }
+
+    /**
+     * Notify the backend that a player has arrived via instant transfer.
+     * This triggers the backend agent to grant arrival flight and fire arrival events.
+     *
+     * @param uuid the player's UUID
+     * @param fromServer the server the player came from
+     */
+    public void sendArrival(UUID uuid, String fromServer) {
+        proxy.getPlayer(uuid).flatMap(Player::getCurrentServer).ifPresent(server -> {
+            String payload = "arrival:" + uuid + ":" + fromServer;
+            server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
+            logger.info("[COORD] sent arrival to {} for {} (from {})",
+                    server.getServerInfo().getName(), uuid, fromServer);
         });
     }
 
