@@ -16,15 +16,7 @@ public class EventFire {
         catch (Exception e) { Bukkit.getLogger().warning("Error in agent listener: " + e.getMessage()); }
     }
 
-    public static void fireFlightGranted(UUID playerId, int ticks) {
-        FlightEvent event = new FlightEvent(playerId, ticks);
-        try {
-            Bukkit.getPluginManager().callEvent(event);
-        }
-        catch (Exception e) { Bukkit.getLogger().warning("Error in agent listener: " + e.getMessage()); }
-    }
-
-    public static void fireFlightRevoked(UUID playerId, int ticks) {
+    public static void fireFlight(UUID playerId, int ticks) {
         FlightEvent event = new FlightEvent(playerId, ticks);
         try {
             Bukkit.getPluginManager().callEvent(event);

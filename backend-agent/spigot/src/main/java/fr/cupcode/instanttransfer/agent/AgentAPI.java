@@ -32,7 +32,7 @@ public class AgentAPI implements InstantTransferAgentAPI {
                 Bukkit.getLogger().info("[flight-guard] granted arrival flight for " + player.getName() + " (" + ticks + " ticks)");
             }
         }
-        EventFire.fireFlightGranted(playerId, ticks);
+        EventFire.fireFlight(playerId, ticks); //Grant flight
     }
 
     @Override
@@ -55,7 +55,9 @@ public class AgentAPI implements InstantTransferAgentAPI {
     public boolean isDebug() { return ConfigValue.isDebug(); }
 
     public static boolean consumeFallGrace(UUID uuid) { return getFallGrace().remove(uuid); }
+
     public static boolean hasFlightGrace(UUID uuid) { return getFlightGrace().contains(uuid); }
+
     public static void revokeFlightGrace(UUID uuid) {
         if (!getFlightGrace().remove(uuid)) return;
 
@@ -67,7 +69,7 @@ public class AgentAPI implements InstantTransferAgentAPI {
                 Bukkit.getLogger().info("[fall-guard] flight grace revoked for " + player.getName());
             }
         }
-        EventFire.fireFlightRevoked(uuid, (int) ConfigValue.getFallGraceTicks());
+        EventFire.fireFlight(uuid, (int) ConfigValue.getFallGraceTicks()); //Revoke flight
     }
 
     protected static Set<UUID> getFallGrace() {
