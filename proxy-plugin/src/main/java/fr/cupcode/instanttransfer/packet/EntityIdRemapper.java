@@ -38,6 +38,7 @@ import io.netty.buffer.ByteBuf;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.util.EnumSet;
 
 /**
  * Entity-id remap for the zero-screen switch (Velocity issue #251).
@@ -57,6 +58,23 @@ import java.nio.charset.StandardCharsets;
 public final class EntityIdRemapper implements PacketListener {
 
     public static final String IDS_CHANNEL = "instanttransfer:ids";
+
+    private static final EnumSet<PacketType.Play.Server> SEND_TRACKED = EnumSet.of(
+            PacketType.Play.Server.PLUGIN_MESSAGE,
+            PacketType.Play.Server.ENTITY_STATUS, PacketType.Play.Server.ENTITY_VELOCITY,
+            PacketType.Play.Server.ENTITY_EFFECT, PacketType.Play.Server.REMOVE_ENTITY_EFFECT,
+            PacketType.Play.Server.UPDATE_ATTRIBUTES, PacketType.Play.Server.HURT_ANIMATION,
+            PacketType.Play.Server.DAMAGE_EVENT, PacketType.Play.Server.ENTITY_ANIMATION,
+            PacketType.Play.Server.ENTITY_METADATA, PacketType.Play.Server.ENTITY_EQUIPMENT,
+            PacketType.Play.Server.SET_PASSENGERS, PacketType.Play.Server.ATTACH_ENTITY,
+            PacketType.Play.Server.ENTITY_TELEPORT, PacketType.Play.Server.ENTITY_POSITION_SYNC,
+            PacketType.Play.Server.ENTITY_HEAD_LOOK, PacketType.Play.Server.ENTITY_ROTATION,
+            PacketType.Play.Server.ENTITY_RELATIVE_MOVE,
+            PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION,
+            PacketType.Play.Server.DESTROY_ENTITIES, PacketType.Play.Server.CAMERA);
+
+    private static final EnumSet<PacketType.Play.Client> RECEIVE_TRACKED = EnumSet.of(
+            PacketType.Play.Client.INTERACT_ENTITY, PacketType.Play.Client.ENTITY_ACTION);
 
     private final SwitchManager manager;
     private final PluginConfig config;
@@ -81,7 +99,9 @@ public final class EntityIdRemapper implements PacketListener {
             // retarget it to the backend id and make the client silently drop it.
             return;
         }
-        PacketTypeCommon type = event.getPacketType();
+        Object t = event.getPacketType();
+        if (!(t instanceof PacketType.Play.Server ps) || !SEND_TRACKED.contains(ps)) return;
+        PacketTypeCommon type = ps;
 
         try {
             if (type == PacketType.Play.Server.PLUGIN_MESSAGE) {
@@ -246,7 +266,9 @@ public final class EntityIdRemapper implements PacketListener {
         if (!state.remapActive()) {
             return;
         }
-        PacketTypeCommon type = event.getPacketType();
+        Object t = event.getPacketType();
+        if (!(t instanceof PacketType.Play.Client pc) || !RECEIVE_TRACKED.contains(pc)) return;
+        PacketTypeCommon type = pc;
 
         try {
             if (type == PacketType.Play.Client.INTERACT_ENTITY) {

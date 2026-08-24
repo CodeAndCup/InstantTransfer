@@ -90,6 +90,21 @@ public final class SeamlessPacketListener implements PacketListener {
     private static final byte REL_X = 0x01;
     private static final byte REL_Z = 0x04;
 
+    private static final EnumSet<PacketType.Play.Server> SEND_TRACKED = EnumSet.of(
+            PacketType.Play.Server.SPAWN_ENTITY, PacketType.Play.Server.DESTROY_ENTITIES,
+            PacketType.Play.Server.UNLOAD_CHUNK, PacketType.Play.Server.CHUNK_DATA,
+            PacketType.Play.Server.JOIN_GAME, PacketType.Play.Server.RESPAWN,
+            PacketType.Play.Server.ENTITY_EFFECT, PacketType.Play.Server.REMOVE_ENTITY_EFFECT,
+            PacketType.Play.Server.PLAYER_INFO_REMOVE, PacketType.Play.Server.PLAYER_INFO_UPDATE,
+            PacketType.Play.Server.SCOREBOARD_OBJECTIVE, PacketType.Play.Server.TEAMS,
+            PacketType.Play.Server.SET_COOLDOWN, PacketType.Play.Server.CHANGE_GAME_STATE,
+            PacketType.Play.Server.OPEN_WINDOW, PacketType.Play.Server.OPEN_HORSE_WINDOW,
+            PacketType.Play.Server.CLOSE_WINDOW, PacketType.Play.Server.PLAYER_ABILITIES,
+            PacketType.Play.Server.PLAYER_POSITION_AND_LOOK);
+
+    private static final EnumSet<PacketType.Play.Client> RECEIVE_TRACKED = EnumSet.of(
+            PacketType.Play.Client.CLOSE_WINDOW);
+
     private final SwitchManager manager;
     private final CoordManager coord;
     private final PluginConfig config;
@@ -115,7 +130,9 @@ public final class SeamlessPacketListener implements PacketListener {
         if (state.suppressListener()) {
             return; // one of OUR injected packets re-entering the pipeline
         }
-        PacketTypeCommon type = event.getPacketType();
+        Object t = event.getPacketType();
+        if (!(t instanceof PacketType.Play.Server ps) || !SEND_TRACKED.contains(ps)) return;
+        PacketTypeCommon type = ps;
 
         try {
             if (type == PacketType.Play.Server.SPAWN_ENTITY) {
@@ -361,10 +378,11 @@ public final class SeamlessPacketListener implements PacketListener {
     @Override
     public void onPacketReceive(PacketReceiveEvent event) {
         User user = event.getUser();
-        if (user == null || user.getUUID() == null
-                || event.getPacketType() != PacketType.Play.Client.CLOSE_WINDOW) {
+        if (user == null || user.getUUID() == null) {
             return;
         }
+        Object t = event.getPacketType();
+        if (!(t instanceof PacketType.Play.Client pc) || !RECEIVE_TRACKED.contains(pc)) return;
         SwitchState state = manager.getOrCreate(user.getUUID());
         if (state.suppressListener()) {
             return;
@@ -582,7 +600,9 @@ public final class SeamlessPacketListener implements PacketListener {
         Set<Long> ghostChunks = state.ghostChunks();
         int entityCount = ghostEntities.size();
         if (entityCount > 0) {
-            int[] ids = ghostEntities.stream().mapToInt(Integer::intValue).toArray();
+            int[] ids = new int[ghostEntities.size()];
+            int i = 0;
+            for (Integer gid : ghostEntities) ids[i++] = gid;
             sendSuppressed(user, state, new WrapperPlayServerDestroyEntities(ids));
             state.trackedEntities().removeAll(ghostEntities);
         }
