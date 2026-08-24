@@ -92,11 +92,11 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Tab list, boss bars | handled by Velocity on switch | ✅ automatic |
 | View/simulation distance, recipes, advancements | re-sent at join | ✅ automatic |
 | Item cooldowns (ender pearl, shield…) | SET_COOLDOWN tracking → zeroed on release (a real join never carries them over) | ✅ |
-| Old server's scoreboard objectives/teams | SCOREBOARD_OBJECTIVE/TEAMS tracking → REMOVE on release (dropping an objective also drops its scores + display slot; dropping a team drops memberships) | ✅ |
+| Old server's scoreboard objectives/teams | SCOREBOARD_OBJECTIVE/TEAMS tracking → REMOVE on release; a re-CREATE of a still-ghost name gets a REMOVE injected first (the vanilla client THROWS on duplicate objective CREATE → "network error" kick); the Respawn fallback also cleans them (the scoreboard is the one thing that survives a respawn client-side) | ✅ |
 | Ghost weather (old server's rain) | CHANGE_GAME_STATE weather tracking → END_RAINING + zeroed rain/thunder levels on release if the new server sent no weather | ✅ |
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |
 | Own tab-list entry (the client caches its PlayerInfo object inside the player entity; a remove/re-add cycle strands the cache → spectator noclip breaks, isSpectator/isCreative read a stale gamemode) | own-UUID filtered out of PLAYER_INFO_REMOVE + re-ADDs downgraded to in-place updates of the surviving entry | ✅ |
-| Different dimension between servers | **Auto-fallback to Respawn KEEP_ALL_DATA** (patch tracks client dim; if backend dim ≠ client dim, sends Respawn instead of zero-screen) | ✅ |
+| Different dimension between servers | patch compares the dimension type at each switch → automatic real-Respawn fallback (correct vanilla reload, brief screen); the plugin detects the Respawn and stands its machinery down; backend-relayed Respawns (portals, /execute in … tp, death) also update the tracked dimension | ✅ (fallback, not zero-screen: a client level cannot change sky/height in place) |
 
 ## 6. Remaining work
 

@@ -1,3 +1,31 @@
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java
+index dfe230e..6864fc0 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/BackendPlaySessionHandler.java
+@@ -62,6 +62,7 @@ import com.velocitypowered.proxy.protocol.packet.RemovePlayerInfoPacket;
+ import com.velocitypowered.proxy.protocol.packet.RemoveResourcePackPacket;
+ import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
+ import com.velocitypowered.proxy.protocol.packet.ResourcePackResponsePacket;
++import com.velocitypowered.proxy.protocol.packet.RespawnPacket;
+ import com.velocitypowered.proxy.protocol.packet.ServerDataPacket;
+ import com.velocitypowered.proxy.protocol.packet.TabCompleteResponsePacket;
+ import com.velocitypowered.proxy.protocol.packet.TransferPacket;
+@@ -189,6 +190,15 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
+     return false; // forward
+   }
+ 
++  @Override
++  public boolean handle(RespawnPacket packet) {
++    // Seamless switching: the backend itself can move the player across dimensions (portals,
++    // teleports, death respawns) — keep the client's tracked dimension in sync so the next
++    // switch picks zero-screen vs Respawn-fallback correctly.
++    playerSessionHandler.onBackendRespawn(packet);
++    return false; // forward untouched
++  }
++
+   @Override
+   public boolean handle(final ResourcePackRequestPacket packet) {
+     final ResourcePackInfo.Builder builder = new VelocityResourcePackInfo.BuilderImpl(
 diff --git a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java b/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java
 index 8cc1bf8..7808088 100644
 --- a/proxy/src/main/java/com/velocitypowered/proxy/connection/backend/ConfigSessionHandler.java
@@ -143,10 +171,10 @@ index 8cc1bf8..7808088 100644
    }
  
 diff --git a/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java b/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java
-index 8880233..97967e5 100644
+index 8880233..122cb7e 100644
 --- a/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java
 +++ b/proxy/src/main/java/com/velocitypowered/proxy/connection/client/ClientPlaySessionHandler.java
-@@ -590,9 +590,45 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -590,9 +590,87 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     *
     * @return a future that completes when the switch is complete
     */
@@ -179,10 +207,46 @@ index 8880233..97967e5 100644
 +  private int seamlessClientEntityId = -1;
 +
 +  /**
-+   * The dimension the CLIENT believes it is in: updated whenever a JoinGame or Respawn is actually
-+   * forwarded to the client. Used to detect cross-dimension switches in zero-screen mode.
++   * Dimension type key of the CLIENT's current level, set by every JoinGame/Respawn actually
++   * forwarded. A zero-screen switch only works into the SAME dimension type (sky, fog, world
++   * height are baked into the client level); when the new backend's JoinGame reports a different
++   * one, {@link #doSeamlessClientServerSwitch} falls back to a real Respawn — a correct vanilla
++   * world reload at the cost of a brief loading screen.
 +   */
-+  private com.velocitypowered.api.util.Dimension seamlessClientDimension = null;
++  private String seamlessClientDimension = null;
++
++  /**
++   * Comparison key for the dimension TYPE of a JoinGame: the string key pre-1.20.5, the registry
++   * id after (registries must be identical across backends anyway — a seamless prerequisite —
++   * so the numeric id compares reliably).
++   */
++  private static String seamlessDimensionKey(JoinGamePacket joinGame) {
++    if (joinGame.getDimensionInfo() != null
++        && joinGame.getDimensionInfo().getRegistryIdentifier() != null
++        && !joinGame.getDimensionInfo().getRegistryIdentifier().isEmpty()) {
++      return joinGame.getDimensionInfo().getRegistryIdentifier();
++    }
++    return "#" + joinGame.getDimension();
++  }
++
++  /**
++   * Called (via BackendPlaySessionHandler) for every backend-relayed Respawn: portals,
++   * {@code /execute in <dim> run tp}, death respawns… all change the client's dimension WITHOUT
++   * any server switch, so the tracked dimension must follow — otherwise the next switch could go
++   * zero-screen ACROSS dimensions (broken world) or needlessly fall back.
++   */
++  public void onBackendRespawn(RespawnPacket respawn) {
++    final String previous = seamlessClientDimension;
++    if (respawn.getDimensionInfo() != null
++        && respawn.getDimensionInfo().getRegistryIdentifier() != null
++        && !respawn.getDimensionInfo().getRegistryIdentifier().isEmpty()) {
++      seamlessClientDimension = respawn.getDimensionInfo().getRegistryIdentifier();
++    } else {
++      seamlessClientDimension = "#" + respawn.getDimension();
++    }
++    logger.info("[seamless] backend respawn for {}: client dimension {} -> {}",
++        player.getUsername(), previous, seamlessClientDimension);
++  }
 +
    public CompletableFuture<Void> doSwitch() {
      final VelocityServerConnection existingConnection = player.getConnectedServer();
@@ -198,7 +262,7 @@ index 8880233..97967e5 100644
      if (existingConnection != null) {
        // Shut down the existing server connection.
        player.setConnectedServer(null);
-@@ -601,10 +637,12 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -601,10 +679,12 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
        // Send keep alive to try to avoid timeouts
        player.sendKeepAlive();
  
@@ -215,7 +279,7 @@ index 8880233..97967e5 100644
        if (player.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
          player.getBossBarManager().dropPackets();
        } else {
-@@ -612,7 +650,13 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -612,7 +692,13 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
        }
      }
  
@@ -230,16 +294,16 @@ index 8880233..97967e5 100644
  
      return configSwitchFuture;
    }
-@@ -631,6 +675,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -631,6 +717,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
        // The player wasn't spawned in yet, so we don't need to do anything special. Just send
        // JoinGame.
        spawned = true;
 +      seamlessClientEntityId = joinGame.getEntityId();
-+      seamlessClientDimension = joinGame.getDimension();
-       player.getConnection().delayedWrite(joinGame);
-       // Required for Legacy Forge
++      seamlessClientDimension = seamlessDimensionKey(joinGame);
+      player.getConnection().delayedWrite(joinGame);
+      // Required for Legacy Forge
        player.getPhase().onFirstJoin(player);
-@@ -642,6 +687,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -642,6 +730,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
        // entity IDs and send new dimension information.
        if (player.getConnection().getType() == ConnectionTypes.LEGACY_FORGE) {
          this.doSafeClientServerSwitch(joinGame);
@@ -248,20 +312,18 @@ index 8880233..97967e5 100644
        } else {
          this.doFastClientServerSwitch(joinGame);
        }
-@@ -695,6 +742,51 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -695,6 +785,58 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
      destination.completeJoin();
    }
  
 +  /**
-+   * Seamless switch (Stage 2a): the client stays in PLAY and in the SAME dimension, so instead of the
-+   * usual JoinGame (which recreates the client level and shows the "Downloading terrain" screen) we
-+   * send only a same-dimension Respawn. A same-dimension respawn does not reload the level, so no
-+   * loading screen is shown - the world is refreshed in place from the new backend's packets.
-+   *
-+   * <p>NOTE: this assumes the destination is the same dimension as the client's current one (true for
-+   * a same-registry lobby&lt;-&gt;minigame network). It also does not yet rewrite the player's entity id
-+   * (issue #251), so backend packets that reference the player's own entity may be ignored by the
-+   * client until Stage 2b adds entity-id remapping.</p>
++   * Seamless switch: the client stays in PLAY. Default (zero-screen) sends NEITHER JoinGame nor
++   * Respawn — the world morphs in place from the new backend's packets, with the companion proxy
++   * plugin handling ghost cleanup, the arrival flight-freeze and entity-id remapping (issue #251,
++   * fed by the synthetic ids plugin message written below). Falls back to a real Respawn when the
++   * destination runs a DIFFERENT dimension type (zero-screen is impossible: the client level's
++   * sky/fog/height are immutable) or when -Dvelocity.seamlessRespawn=true opts into the robust
++   * flavor unconditionally.
 +   */
 +  private void doSeamlessClientServerSwitch(JoinGamePacket joinGame) {
 +    // Announce (client id : new backend id : new gamemode) to the companion proxy plugin, which
@@ -274,31 +336,28 @@ index 8880233..97967e5 100644
 +    player.getConnection().delayedWrite(new PluginMessagePacket("instanttransfer:ids",
 +        Unpooled.wrappedBuffer(idsPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8))));
 +
-+    // Cross-dimension check: if the backend's dimension differs from what the client currently has,
-+    // zero-screen is unsafe (client would receive chunks for a different dimension without a Respawn).
-+    // Fall back to a same-dimension Respawn (KEEP_ALL_DATA) which cleanly transitions the client.
-+    com.velocitypowered.api.util.Dimension backendDim = joinGame.getDimension();
-+    boolean crossDimension = seamlessClientDimension != null && !seamlessClientDimension.equals(backendDim);
-+    if (crossDimension) {
-+      logger.info("[seamless] Cross-dimension switch detected ({} -> {}), falling back to Respawn",
-+          seamlessClientDimension, backendDim);
-+    }
++    // A zero-screen switch only works into the SAME dimension type: the client keeps its level,
++    // whose sky/fog/height are immutable. If the new backend runs another dimension, fall back to
++    // a real Respawn — the vanilla reload (brief loading screen) with the CORRECT new dimension.
++    final String newDimension = seamlessDimensionKey(joinGame);
++    final boolean crossDimension =
++        seamlessClientDimension != null && !seamlessClientDimension.equals(newDimension);
++    seamlessClientDimension = newDimension;
 +
 +    if (SEAMLESS_RESPAWN || crossDimension) {
-+      // Robust fallback: same-dimension Respawn instead of the full JoinGame. Cleanly resets the
-+      // player (no ghost entities, no arrival fall damage) and makes the client wait for the landing
-+      // chunk before placing the player, at the cost of a brief "loading terrain" flash.
++      // Robust fallback: a Respawn instead of the full JoinGame. Cleanly resets the player (no
++      // ghost entities, no arrival fall damage) and makes the client wait for the landing chunk
++      // before placing the player, at the cost of a brief "loading terrain" flash.
 +      // keptData = KEEP_ATTRIBUTES | KEEP_ENTITY_DATA = 0x03.
 +      final RespawnPacket respawn = new RespawnPacket(
 +          joinGame.getDimension(), joinGame.getPartialHashedSeed(), joinGame.getDifficulty(),
 +          joinGame.getGamemode(), joinGame.getLevelType(), (byte) 0x03, joinGame.getDimensionInfo(),
 +          joinGame.getPreviousGamemode(), joinGame.getCurrentDimensionData(),
 +          joinGame.getLastDeathPosition(), joinGame.getPortalCooldown(), joinGame.getSeaLevel());
-+      logger.info("[seamless] doSeamlessClientServerSwitch: respawn(KEEP_ALL_DATA), backend entityId={} crossDim={}",
-+          joinGame.getEntityId(), crossDimension);
++      logger.info("[seamless] doSeamlessClientServerSwitch: respawn(KEEP_ALL_DATA), backend "
++              + "entityId={}{}", joinGame.getEntityId(),
++          crossDimension ? " — CROSS-DIMENSION fallback (dimension " + newDimension + ")" : "");
 +      player.getConnection().delayedWrite(respawn);
-+      // Update tracked client dimension since we sent a Respawn
-+      seamlessClientDimension = backendDim;
 +      return;
 +    }
 +    // ZERO-SCREEN mode (default): send neither JoinGame nor Respawn. The client keeps its current
@@ -312,21 +371,64 @@ index 8880233..97967e5 100644
    private void doFastClientServerSwitch(JoinGamePacket joinGame) {
      // In order to handle switching to another server, you will need to send two packets:
      //
-@@ -705,6 +797,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -705,6 +847,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
      // to perform entity ID rewrites, eliminating potential issues from rewriting packets and
      // improving compatibility with mods.
-final RespawnPacket respawn = RespawnPacket.fromJoinGame(joinGame);
+     final RespawnPacket respawn = RespawnPacket.fromJoinGame(joinGame);
 +    seamlessClientEntityId = joinGame.getEntityId(); // client adopts the new id from this JoinGame
-+    seamlessClientDimension = joinGame.getDimension(); // track client dimension
-
-      if (player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_16)) {
++    seamlessClientDimension = seamlessDimensionKey(joinGame);
+ 
+     if (player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_16)) {
        // Before Minecraft 1.16, we could not switch to the same dimension without sending an
-@@ -722,6 +815,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -722,6 +866,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
      // same effect but tend to work better with buggier clients (Forge 1.8 in particular).
  
      // Send the JoinGame packet itself, unmodified.
 +    seamlessClientEntityId = joinGame.getEntityId(); // client adopts the new id from this JoinGame
-+    seamlessClientDimension = joinGame.getDimension(); // track client dimension
++    seamlessClientDimension = seamlessDimensionKey(joinGame);
      player.getConnection().delayedWrite(joinGame);
  
      // Send a respawn packet in a different dimension.
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java b/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java
+index 2971087..f5e40f7 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/protocol/StateRegistry.java
+@@ -580,13 +580,16 @@ public enum StateRegistry {
+           map(0x3E, MINECRAFT_1_19_1, true),
+           map(0x3D, MINECRAFT_1_19_3, true),
+           map(0x41, MINECRAFT_1_19_4, true),
+-          map(0x43, MINECRAFT_1_20_2, true),
+-          map(0x45, MINECRAFT_1_20_3, true),
+-          map(0x47, MINECRAFT_1_20_5, true),
+-          map(0x4C, MINECRAFT_1_21_2, true),
+-          map(0x4B, MINECRAFT_1_21_5, true),
+-          map(0x50, MINECRAFT_1_21_9, true),
+-          map(0x52, MINECRAFT_26_1, true));
++          // Seamless switching (1.20.2+): backend-relayed Respawns (portals, /execute in … tp,
++          // death respawns) must be DECODED so the proxy can track the client's dimension —
++          // encodeOnly would let them pass through as raw bytes, invisible to session handlers.
++          map(0x43, MINECRAFT_1_20_2, false),
++          map(0x45, MINECRAFT_1_20_3, false),
++          map(0x47, MINECRAFT_1_20_5, false),
++          map(0x4C, MINECRAFT_1_21_2, false),
++          map(0x4B, MINECRAFT_1_21_5, false),
++          map(0x50, MINECRAFT_1_21_9, false),
++          map(0x52, MINECRAFT_26_1, false));
+       clientbound.register(
+           RemoveResourcePackPacket.class,
+           RemoveResourcePackPacket::new,
+diff --git a/proxy/src/main/java/com/velocitypowered/proxy/protocol/packet/RespawnPacket.java b/proxy/src/main/java/com/velocitypowered/proxy/protocol/packet/RespawnPacket.java
+index fd9c8ca..41b4d65 100644
+--- a/proxy/src/main/java/com/velocitypowered/proxy/protocol/packet/RespawnPacket.java
++++ b/proxy/src/main/java/com/velocitypowered/proxy/protocol/packet/RespawnPacket.java
+@@ -77,6 +77,10 @@ public class RespawnPacket implements MinecraftPacket {
+     return dimension;
+   }
+ 
++  public DimensionInfo getDimensionInfo() {
++    return dimensionInfo;
++  }
++
+   public void setDimension(int dimension) {
+     this.dimension = dimension;
+   }

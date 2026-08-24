@@ -15,6 +15,7 @@ import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
+import com.github.retrooper.packetevents.protocol.world.dimension.DimensionTypeRef;
 import com.github.retrooper.packetevents.resources.ResourceLocation;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientCloseWindow;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState;
@@ -31,6 +32,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPl
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRespawn;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetCooldown;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
@@ -155,9 +157,13 @@ public final class SeamlessPacketListener implements PacketListener {
             } else if (type == PacketType.Play.Server.JOIN_GAME) {
                 // Only the very FIRST login's JoinGame ever reaches the client (seamless switches
                 // forward none); it defines the entity id the client keeps for its whole session.
-                int id = new WrapperPlayServerJoinGame(event).getEntityId();
-                state.entityIds(id, id);
+                WrapperPlayServerJoinGame w = new WrapperPlayServerJoinGame(event);
+                state.entityIds(w.getEntityId(), w.getEntityId());
+                state.clientDimension(dimensionKey(w.getDimensionTypeRef()));
                 state.markNewServerTalking(); // safety: patch disabled → vanilla switch path
+
+            } else if (type == PacketType.Play.Server.RESPAWN) {
+                onRespawn(event, user, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_EFFECT) {
                 // Runs after the remapper, so the id is client-space: self-effects only.
@@ -205,12 +211,19 @@ public final class SeamlessPacketListener implements PacketListener {
             } else if (type == PacketType.Play.Server.SCOREBOARD_OBJECTIVE) {
                 WrapperPlayServerScoreboardObjective w = new WrapperPlayServerScoreboardObjective(event);
                 if (w.getMode() == WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE) {
-                    state.activeObjectives().add(w.getName());
                     if (state.oldServerTalking()) {
                         state.ghostObjectives().add(w.getName());
-                    } else {
-                        state.ghostObjectives().remove(w.getName()); // new server re-created it
+                    } else if (state.ghostObjectives().remove(w.getName())) {
+                        // The new server re-creates an objective the client still has from the old
+                        // one. The vanilla client THROWS on a duplicate objective CREATE ("An
+                        // objective with the name ... already exists!" → disconnect), so remove
+                        // the stale one first — this injected packet reaches the client BEFORE
+                        // the in-flight CREATE.
+                        sendSuppressed(user, state, new WrapperPlayServerScoreboardObjective(
+                                w.getName(), WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE,
+                                null, null));
                     }
+                    state.activeObjectives().add(w.getName());
                 } else if (w.getMode() == WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE) {
                     state.activeObjectives().remove(w.getName());
                     state.ghostObjectives().remove(w.getName());
@@ -219,12 +232,15 @@ public final class SeamlessPacketListener implements PacketListener {
             } else if (type == PacketType.Play.Server.TEAMS) {
                 WrapperPlayServerTeams w = new WrapperPlayServerTeams(event);
                 if (w.getTeamMode() == WrapperPlayServerTeams.TeamMode.CREATE) {
-                    state.activeTeams().add(w.getTeamName());
                     if (state.oldServerTalking()) {
                         state.ghostTeams().add(w.getTeamName());
-                    } else {
-                        state.ghostTeams().remove(w.getTeamName()); // new server re-created it
+                    } else if (state.ghostTeams().remove(w.getTeamName())) {
+                        // Duplicate team CREATE only logs a client warning (the stale team wins);
+                        // remove the old one first so the new server's definition applies.
+                        sendSuppressed(user, state, new WrapperPlayServerTeams(
+                                w.getTeamName(), WrapperPlayServerTeams.TeamMode.REMOVE, Optional.empty()));
                     }
+                    state.activeTeams().add(w.getTeamName());
                 } else if (w.getTeamMode() == WrapperPlayServerTeams.TeamMode.REMOVE) {
                     state.activeTeams().remove(w.getTeamName());
                     state.ghostTeams().remove(w.getTeamName());
@@ -333,6 +349,88 @@ public final class SeamlessPacketListener implements PacketListener {
         }
         if (windowId == state.ghostWindowId()) {
             state.ghostWindowId(-1);
+        }
+    }
+
+    /**
+     * A real Respawn reached the client: the patched Velocity's cross-dimension fallback, its
+     * opt-in respawn mode ({@code -Dvelocity.seamlessRespawn=true}), or a backend respawning a
+     * dead player. The client resets itself, so the seamless machinery stands down accordingly
+     * instead of fighting it.
+     */
+    private void onRespawn(PacketSendEvent event, User user, SwitchState state) {
+        WrapperPlayServerRespawn w = new WrapperPlayServerRespawn(event);
+        String newDimension = dimensionKey(w.getDimensionTypeRef());
+        boolean crossDimension = newDimension != null && state.clientDimension() != null
+                && !newDimension.equals(state.clientDimension());
+        if (newDimension != null) {
+            state.clientDimension(newDimension);
+        }
+        // Either flavor recreates the LocalPlayer entity: entity-attached client state is gone.
+        state.activeEffects().clear();
+        state.ghostEffects().clear();
+        state.activeCooldowns().clear();
+        state.ghostCooldowns().clear();
+        state.openWindowId(-1);
+        state.ghostWindowId(-1);
+        if (!crossDimension) {
+            // Same-dimension respawn KEEPS the client level (chunks/entities survive) — a running
+            // guard (respawn mode) must keep going: its ghost cleanup is still needed.
+            return;
+        }
+        // Cross-dimension: the client rebuilt its level from scratch; nothing old survives.
+        // (Scoreboard tracking is intentionally kept: it is connection-scoped client-side.)
+        state.loadedChunks().clear();
+        state.trackedEntities().clear();
+        state.ghostEntities().clear();
+        state.ghostChunks().clear();
+        state.clearWeather();
+        state.ghostWeather(false);
+        if (state.finishGuard()) {
+            state.pendingGamemode(-1); // the Respawn itself carries the gamemode
+            state.frozeFlight(false);  // never injected: the Respawn precedes the arrival teleport
+            coord.sendUnfreeze(user.getUUID());
+            // The scoreboard is the one thing that SURVIVES a respawn client-side (it is
+            // connection-scoped, not level-scoped), and with the guard finished the release will
+            // never clean it: remove the old server's objectives/teams here, before the new
+            // server's own scoreboard packets arrive.
+            int objectiveCount = state.ghostObjectives().size();
+            int teamCount = state.ghostTeams().size();
+            for (String name : state.ghostObjectives()) {
+                sendSuppressed(user, state, new WrapperPlayServerScoreboardObjective(
+                        name, WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE, null, null));
+            }
+            state.activeObjectives().removeAll(state.ghostObjectives());
+            state.ghostObjectives().clear();
+            for (String name : state.ghostTeams()) {
+                sendSuppressed(user, state, new WrapperPlayServerTeams(
+                        name, WrapperPlayServerTeams.TeamMode.REMOVE, Optional.empty()));
+            }
+            state.activeTeams().removeAll(state.ghostTeams());
+            state.ghostTeams().clear();
+            logger.info("[InstantTransfer] cross-dimension switch for {}: Respawn fallback "
+                    + "(vanilla world reload), seamless machinery stood down; removed {} ghost "
+                    + "objectives, {} ghost teams", user.getName(), objectiveCount, teamCount);
+        }
+    }
+
+    /** Stable comparison key for a dimension type, whether name- or registry-id-encoded. */
+    private static String dimensionKey(DimensionTypeRef ref) {
+        if (ref == null) {
+            return null;
+        }
+        try {
+            ResourceLocation name = ref.getName();
+            if (name != null) {
+                return name.toString();
+            }
+        } catch (Exception ignored) {
+            // id-based ref (1.20.5+): fall through
+        }
+        try {
+            return "#" + ref.getId();
+        } catch (Exception e) {
+            return null;
         }
     }
 

@@ -123,6 +123,14 @@ public final class SwitchState {
     private volatile boolean ownTabEntryAdded = false;
 
     /**
+     * Dimension type key of the client's current level (from the first JoinGame, then every
+     * Respawn). Lets the listener tell a same-dimension Respawn (client KEEPS its level — chunks
+     * and entities survive) from a cross-dimension one (level rebuilt from scratch — the patched
+     * Velocity's fallback for cross-dimension switches, or a nether→overworld death respawn).
+     */
+    private volatile String clientDimension = null;
+
+    /**
      * True while WE are sending packets from inside the listener; the re-entrant
      * onPacketSend calls for those packets must be ignored (this is what caused the
      * infinite "hold timeout" recursion in the previous position-hold attempt).
@@ -176,6 +184,14 @@ public final class SwitchState {
 
     public void markOwnTabEntryAdded() {
         ownTabEntryAdded = true;
+    }
+
+    public String clientDimension() {
+        return clientDimension;
+    }
+
+    public void clientDimension(String dimension) {
+        this.clientDimension = dimension;
     }
 
     public boolean guardActive() {

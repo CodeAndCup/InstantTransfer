@@ -94,11 +94,11 @@ moins invasif possible.
 | Tab-list, boss bars | gérés par Velocity au switch | ✅ automatique |
 | View/simulation distance, recettes, advancements | renvoyés au join | ✅ automatique |
 | Cooldowns d'items (ender pearl, bouclier…) | tracking SET_COOLDOWN → mis à zéro à la release (un vrai join ne les transporte jamais) | ✅ |
-| Scoreboard/objectifs/équipes de l'ancien serveur | tracking SCOREBOARD_OBJECTIVE/TEAMS → REMOVE à la release (supprimer un objectif supprime aussi ses scores + slot d'affichage ; supprimer une équipe supprime ses membres) | ✅ |
+| Scoreboard/objectifs/équipes de l'ancien serveur | tracking SCOREBOARD_OBJECTIVE/TEAMS → REMOVE à la release ; un re-CREATE d'un nom encore fantôme reçoit d'abord un REMOVE injecté (le client vanilla JETTE une exception sur un CREATE d'objectif dupliqué → kick « network error ») ; le fallback Respawn les nettoie aussi (le scoreboard est la seule chose qui survit à un respawn côté client) | ✅ |
 | Météo fantôme (pluie de l'ancien serveur) | tracking météo CHANGE_GAME_STATE → END_RAINING + niveaux pluie/orage à zéro à la release si le nouveau serveur n'a rien envoyé | ✅ |
 | GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |
 | Entrée tab-list du joueur lui-même (le client met en cache son objet PlayerInfo dans l'entité joueur ; un cycle remove/re-add orpheline le cache → le noclip spectateur casse, isSpectator/isCreative lisent un gamemode périmé) | UUID du joueur filtré des PLAYER_INFO_REMOVE + re-ADD rétrogradés en updates sur l'entrée survivante | ✅ |
-| Dimension différente entre serveurs | **Fallback auto vers Respawn KEEP_ALL_DATA** (patch trace la dim client ; si dim backend ≠ dim client, envoie Respawn au lieu du zéro-écran) | ✅ |
+| Dimension différente entre serveurs | le patch compare le type de dimension à chaque switch → fallback automatique en vrai Respawn (reload vanilla correct, bref écran) ; le plugin détecte le Respawn et met sa mécanique en veille ; les Respawn relayés des backends (portails, /execute in … tp, mort) mettent aussi à jour la dimension trackée | ✅ (fallback, pas zéro-écran : un level client ne peut pas changer de ciel/hauteur sur place) |
 
 ## 6. Travail restant
 
