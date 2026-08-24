@@ -33,6 +33,16 @@ public final class SwitchState {
     /** Monotonic index for the debug-only peek-vs-wrapper verification (first N chunks only). */
     private final AtomicInteger chunkPeekChecks = new AtomicInteger();
 
+    /**
+     * Byte offset of the leading entity-id VarInt inside raw movement-packet bodies (0 once
+     * proven, -1 when peeking proved unusable for this connection). Probed once on the first
+     * movement packet of a connection, then reused; null until probed.
+     */
+    private volatile Integer movementHeaderOffsetCache;
+
+    /** Monotonic index for the debug-only peek-vs-wrapper verification (first N movement packets). */
+    private final AtomicInteger movementPeekChecks = new AtomicInteger();
+
     /** Entities the client currently has spawned (backend ids). */
     private final Set<Integer> trackedEntities = ConcurrentHashMap.newKeySet();
 
@@ -411,6 +421,13 @@ public final class SwitchState {
 
     public int nextChunkPeekCheck() {
         return chunkPeekChecks.getAndIncrement();
+    }
+
+    public Integer movementHeaderOffsetCache() { return movementHeaderOffsetCache; }
+    public void movementHeaderOffsetCache(int v) { this.movementHeaderOffsetCache = v; }
+
+    public int nextMovementPeekCheck() {
+        return movementPeekChecks.getAndIncrement();
     }
 
     public Set<Integer> trackedEntities() {

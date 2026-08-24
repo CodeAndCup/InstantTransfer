@@ -1,6 +1,7 @@
 package fr.cupcode.instanttransfer.packet;
 
 import fr.cupcode.instanttransfer.config.PluginConfig;
+import fr.cupcode.instanttransfer.protocol.LeadingVarInt;
 import fr.cupcode.instanttransfer.switching.SwitchManager;
 import fr.cupcode.instanttransfer.switching.SwitchState;
 import com.github.retrooper.packetevents.event.PacketListener;
@@ -33,6 +34,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateAttributes;
+import io.netty.buffer.ByteBuf;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -90,11 +92,15 @@ public final class EntityIdRemapper implements PacketListener {
                 return;
             }
 
+            // ENTITY_STATUS: NOT peek-guarded — its entity id is a fixed big-endian Int (not a
+            // VarInt) in every protocol version (packetevents reads it with readInt), so a VarInt
+            // peek would misparse the id's high bytes and could wrongly skip a needed remap.
             if (type == PacketType.Play.Server.ENTITY_STATUS) {
                 WrapperPlayServerEntityStatus w = new WrapperPlayServerEntityStatus(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_VELOCITY) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityVelocity w = new WrapperPlayServerEntityVelocity(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
@@ -111,6 +117,7 @@ public final class EntityIdRemapper implements PacketListener {
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.HURT_ANIMATION) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerHurtAnimation w = new WrapperPlayServerHurtAnimation(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
@@ -131,14 +138,17 @@ public final class EntityIdRemapper implements PacketListener {
                 }
 
             } else if (type == PacketType.Play.Server.ENTITY_ANIMATION) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityAnimation w = new WrapperPlayServerEntityAnimation(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_METADATA) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityMetadata w = new WrapperPlayServerEntityMetadata(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityEquipment w = new WrapperPlayServerEntityEquipment(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
@@ -166,26 +176,32 @@ public final class EntityIdRemapper implements PacketListener {
                 }
 
             } else if (type == PacketType.Play.Server.ENTITY_TELEPORT) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityTeleport w = new WrapperPlayServerEntityTeleport(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_POSITION_SYNC) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityPositionSync w = new WrapperPlayServerEntityPositionSync(event);
                 remapSend(event, w.getId(), w::setId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityHeadLook w = new WrapperPlayServerEntityHeadLook(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_ROTATION) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityRotation w = new WrapperPlayServerEntityRotation(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityRelativeMove w = new WrapperPlayServerEntityRelativeMove(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION) {
+                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityRelativeMoveAndRotation w =
                         new WrapperPlayServerEntityRelativeMoveAndRotation(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
@@ -234,10 +250,13 @@ public final class EntityIdRemapper implements PacketListener {
 
         try {
             if (type == PacketType.Play.Client.INTERACT_ENTITY) {
+                // Client-built bodies carry no packet-id prefix: the leading id sits at offset 0.
+                if (irrelevantByPeek(event, state, 0)) return;
                 WrapperPlayClientInteractEntity w = new WrapperPlayClientInteractEntity(event);
                 remapReceive(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Client.ENTITY_ACTION) {
+                if (irrelevantByPeek(event, state, 0)) return;
                 WrapperPlayClientEntityAction w = new WrapperPlayClientEntityAction(event);
                 remapReceive(event, w.getEntityId(), w::setEntityId, state);
             }
@@ -311,6 +330,69 @@ public final class EntityIdRemapper implements PacketListener {
                               int id, IdSetter setter, SwitchState state) {
         if (rewriteClientToBackend(id, setter, state)) {
             event.markForReEncode(true);
+        }
+    }
+
+    /**
+     * Fast-path: most movement packets target OTHER entities; if the leading id is neither of
+     * ours we can skip wrapper construction + potential re-encode entirely. The sentinel never
+     * causes a skip ({@code id != SENTINEL} clause): an unreadable id always takes the wrapper
+     * path, which is merely slower, never wrong.
+     */
+    private static boolean irrelevantByPeek(PacketSendEvent event, SwitchState state, int offset) {
+        int id = LeadingVarInt.peek((ByteBuf) event.getByteBuf(), offset); // typed Object by PE 2.x
+        return id != LeadingVarInt.SENTINEL
+                && id != state.backendEntityId()
+                && id != state.clientEntityId();
+    }
+
+    /** Same fast-path for client->server packets (fixed offset 0, see call sites). */
+    private static boolean irrelevantByPeek(PacketReceiveEvent event, SwitchState state, int offset) {
+        int id = LeadingVarInt.peek((ByteBuf) event.getByteBuf(), offset); // typed Object by PE 2.x
+        return id != LeadingVarInt.SENTINEL
+                && id != state.backendEntityId()
+                && id != state.clientEntityId();
+    }
+
+    /**
+     * 0 once proven; -1 means "peek unusable for this user — always take the wrapper path".
+     * Probed on the first movement packet: peek at offset 0 must match the wrapper's leading
+     * id exactly once; only then is the cache locked in.
+     */
+    private int movementOffset(PacketSendEvent event, SwitchState state) {
+        Integer cached = state.movementHeaderOffsetCache();
+        if (cached != null) {
+            if (cached >= 0 && config.debug() && state.nextMovementPeekCheck() < 10) {
+                verifyMovementPeek(event, state); // one-time live sanity vs wrapper decode
+            }
+            return cached;
+        }
+        WrapperPlayServerEntityHeadLook probe =
+                new WrapperPlayServerEntityHeadLook(event); // smallest read of the family (id + 1 byte)
+        int wrapperId = probe.getEntityId();
+        int peeked = LeadingVarInt.peek((ByteBuf) event.getByteBuf(), 0);
+        int resolved = (peeked == wrapperId) ? 0 : LeadingVarInt.SENTINEL;
+        state.movementHeaderOffsetCache(resolved);
+        return resolved;
+    }
+
+    /**
+     * One-time live sanity check (debug only, first ten movement packets): the cached-offset peek
+     * must match what a fresh wrapper decodes. Mirrors SeamlessPacketListener#verifyChunkPeek.
+     * PENDING LIVE CONFIRMATION (no network in CI): run with debug on a real proxy and check for
+     * MISMATCH lines before trusting the fast path in production.
+     */
+    private void verifyMovementPeek(PacketSendEvent event, SwitchState state) {
+        try {
+            ByteBuf buf = (ByteBuf) event.getByteBuf(); // typed Object by PE 2.x; Netty buf here
+            Integer offset = state.movementHeaderOffsetCache();
+            int peeked = LeadingVarInt.peek(buf, offset != null ? offset : 0);
+            int wrapperId = new WrapperPlayServerEntityHeadLook(event).getEntityId();
+            logger.info("[InstantTransfer] movement peek verify for {}: peeked {} vs wrapper {}{}",
+                    event.getUser() != null ? event.getUser().getName() : "?",
+                    peeked, wrapperId, peeked == wrapperId ? "" : "  *** MISMATCH — peek disabled ***");
+        } catch (Exception e) {
+            logger.warn("[InstantTransfer] movement peek verify failed: {}", e.toString());
         }
     }
 }
