@@ -543,6 +543,12 @@ public final class SwitchState {
         ghostTeams.addAll(activeTeams);
         ghostWindowId = openWindowId;
         ghostWeather = weatherActive();
+        // Defer every ghost chunk's UnloadChunk NOW, before the new server's resend stream starts:
+        // its CHUNK_DATA/UNLOAD_CHUNK traffic during the guard cancels matching keys, and only the
+        // uncanceled remainder is flushed when the guard ends.
+        for (Long key : ghostChunks) {
+            pendingUnloads.defer(key);
+        }
     }
 
     public static long chunkKey(int x, int z) {
@@ -558,11 +564,13 @@ public final class SwitchState {
     }
 
     /**
-     * Ghost chunks whose UnloadChunk is postponed until the arrival guard ends: whatever the
-     * destination re-sends meanwhile cancels out (it resends ~the whole view distance), saving
-     * hundreds of per-chunk netty writes per switch. Thread-safety: synchronized methods —
-     * release() can fire from a scheduler thread while CHUNK_DATA arrives on the connection
-     * thread.
+     * Ghost chunks whose UnloadChunk is postponed until the arrival guard ends. Keys are deferred
+     * when the switch arms ({@link #snapshotGhosts()}, plus any late old-server chunk) — BEFORE
+     * the new server's resend stream starts; every CHUNK_DATA/UNLOAD_CHUNK the destination sends
+     * during the guard cancels its key, so only genuinely stale chunks get an unload packet at
+     * guard completion or timeout (hundreds fewer netty writes per switch). Thread-safety:
+     * synchronized methods — snapshot/defer runs on a Velocity event thread while CHUNK_DATA
+     * arrives on the connection thread.
      */
     public static final class PendingChunkUnloads {
         private final java.util.Set<Long> pending = new java.util.HashSet<>();

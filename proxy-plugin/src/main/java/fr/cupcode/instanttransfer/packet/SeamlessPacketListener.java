@@ -191,6 +191,7 @@ public final class SeamlessPacketListener implements PacketListener {
                 state.pendingChunkUnloads().cancelIfPresent(key);
                 if (state.oldServerTalking()) {
                     state.ghostChunks().add(key); // late old-server chunk: one more ghost to clean
+                    state.pendingChunkUnloads().defer(key); // ...and one more cancellable deferred unload
                 } else {
                     state.ghostChunks().remove(key); // fresh data replaces any old-server chunk here
                 }
@@ -610,13 +611,11 @@ public final class SeamlessPacketListener implements PacketListener {
             state.trackedEntities().removeAll(ghostEntities);
         }
         int chunkCount = ghostChunks.size();
-        for (Long ghostKey : ghostChunks) {
-            state.pendingChunkUnloads().defer(ghostKey);
-        }
         state.loadedChunks().removeAll(ghostChunks);
         ghostEntities.clear();
         ghostChunks.clear();
-        // Whatever the destination never re-sent goes out now, in one sorted batch.
+        // Ghost-chunk unloads were deferred when the switch armed; resends during the guard
+        // canceled theirs — whatever survived goes out here, in one sorted batch.
         flushPendingChunkUnloads(user, state);
 
         // Effects from the previous server the new one did not re-apply: clear their client display.
