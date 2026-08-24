@@ -50,6 +50,8 @@ public final class SwitchState {
     private final Set<Integer> ghostEntities = ConcurrentHashMap.newKeySet();
     private final Set<Long> ghostChunks = ConcurrentHashMap.newKeySet();
 
+    private final PendingChunkUnloads pendingUnloads = new PendingChunkUnloads();
+
     /**
      * Potion effects the client currently displays on ITSELF (keyed by resource name). Without a
      * Respawn nothing clears them on a switch, so effects unknown to the new server would linger
@@ -442,6 +444,10 @@ public final class SwitchState {
         return ghostChunks;
     }
 
+    public PendingChunkUnloads pendingChunkUnloads() {
+        return pendingUnloads;
+    }
+
     public Map<String, PotionType> activeEffects() {
         return activeEffects;
     }
@@ -549,5 +555,28 @@ public final class SwitchState {
 
     public static int chunkZ(long key) {
         return (int) (key >> 32);
+    }
+
+    /**
+     * Ghost chunks whose UnloadChunk is postponed until the arrival guard ends: whatever the
+     * destination re-sends meanwhile cancels out (it resends ~the whole view distance), saving
+     * hundreds of per-chunk netty writes per switch. Thread-safety: synchronized methods —
+     * release() can fire from a scheduler thread while CHUNK_DATA arrives on the connection
+     * thread.
+     */
+    public static final class PendingChunkUnloads {
+        private final java.util.Set<Long> pending = new java.util.HashSet<>();
+
+        public synchronized void defer(long key) { pending.add(key); }
+        public synchronized void cancelIfPresent(long key) { pending.remove(key); }
+        public synchronized boolean isEmpty() { return pending.isEmpty(); }
+        public synchronized long[] drainSorted() {
+            long[] out = new long[pending.size()];
+            int i = 0;
+            for (Long k : pending) out[i++] = k;
+            pending.clear();
+            java.util.Arrays.sort(out);
+            return out;
+        }
     }
 }

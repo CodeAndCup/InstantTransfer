@@ -155,6 +155,8 @@ public final class SeamlessPacketListener implements PacketListener {
                 long key = SwitchState.chunkKey(w.getChunkX(), w.getChunkZ());
                 state.loadedChunks().remove(key);
                 state.ghostChunks().remove(key);
+                // The client already dropped it: a deferred unload would be redundant.
+                state.pendingChunkUnloads().cancelIfPresent(key);
 
             } else if (type == PacketType.Play.Server.CHUNK_DATA) {
                 // Fast path: read (chunkX,chunkZ) straight off the raw body — constructing the
@@ -186,6 +188,7 @@ public final class SeamlessPacketListener implements PacketListener {
                     key = SwitchState.chunkKey(cx, cz);
                 }
                 state.loadedChunks().add(key);
+                state.pendingChunkUnloads().cancelIfPresent(key);
                 if (state.oldServerTalking()) {
                     state.ghostChunks().add(key); // late old-server chunk: one more ghost to clean
                 } else {
@@ -607,13 +610,14 @@ public final class SeamlessPacketListener implements PacketListener {
             state.trackedEntities().removeAll(ghostEntities);
         }
         int chunkCount = ghostChunks.size();
-        for (long key : ghostChunks) {
-            sendSuppressed(user, state,
-                    new WrapperPlayServerUnloadChunk(SwitchState.chunkX(key), SwitchState.chunkZ(key)));
+        for (Long ghostKey : ghostChunks) {
+            state.pendingChunkUnloads().defer(ghostKey);
         }
         state.loadedChunks().removeAll(ghostChunks);
         ghostEntities.clear();
         ghostChunks.clear();
+        // Whatever the destination never re-sent goes out now, in one sorted batch.
+        flushPendingChunkUnloads(user, state);
 
         // Effects from the previous server the new one did not re-apply: clear their client display.
         Map<String, PotionType> ghostEffects = state.ghostEffects();
@@ -741,11 +745,29 @@ public final class SeamlessPacketListener implements PacketListener {
     }
 
     /**
+     * Send the ghost-chunk unloads that survived destination dedup (see
+     * {@link SwitchState.PendingChunkUnloads}), sorted for deterministic ordering, once the arrival
+     * guard ends — via {@code release()} or the timeout path below.
+     */
+    private void flushPendingChunkUnloads(User user, SwitchState state) {
+        long[] keys = state.pendingChunkUnloads().drainSorted();
+        if (keys.length == 0) {
+            return;
+        }
+        for (long k : keys) {
+            sendSuppressed(user, state, new WrapperPlayServerUnloadChunk(
+                    SwitchState.chunkX(k), SwitchState.chunkZ(k)));
+        }
+        logger.debug("[InstantTransfer] flushed {} deferred chunk unloads", keys.length);
+    }
+
+    /**
      * Handle guard timeout: the arrival chunk didn't arrive in time.
      * If we have an absolute arrival position, send a position correction and keep flight enabled.
      * If relative (unknown absolute position), just extend the timeout — don't guess the position.
      */
     private void handleTimeout(User user, SwitchState state) {
+        flushPendingChunkUnloads(user, state);
         if (!state.arrivalPositionKnown()) {
             if (config.debug()) {
                 logger.warn("[InstantTransfer] timeout but no arrival position known for {}, extending guard",
