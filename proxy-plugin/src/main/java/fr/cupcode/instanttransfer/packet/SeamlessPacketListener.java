@@ -3,6 +3,7 @@ package fr.cupcode.instanttransfer.packet;
 import fr.cupcode.instanttransfer.InstantTransfer;
 import fr.cupcode.instanttransfer.config.PluginConfig;
 import fr.cupcode.instanttransfer.coord.CoordManager;
+import fr.cupcode.instanttransfer.protocol.ProtocolAdapter;
 import fr.cupcode.instanttransfer.switching.SwitchManager;
 import fr.cupcode.instanttransfer.switching.SwitchState;
 import com.github.retrooper.packetevents.event.PacketListener;
@@ -13,7 +14,6 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
-import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
 import com.github.retrooper.packetevents.protocol.world.dimension.DimensionTypeRef;
 import com.github.retrooper.packetevents.resources.ResourceLocation;
@@ -159,7 +159,8 @@ public final class SeamlessPacketListener implements PacketListener {
                 // forward none); it defines the entity id the client keeps for its whole session.
                 WrapperPlayServerJoinGame w = new WrapperPlayServerJoinGame(event);
                 state.entityIds(w.getEntityId(), w.getEntityId());
-                state.clientDimension(dimensionKey(w.getDimensionTypeRef()));
+                state.clientDimension(dimensionKey(w.getDimensionTypeRef(),
+                        state.adapter(() -> ProtocolAdapter.forClientVersion(user.getClientVersion()))));
                 state.markNewServerTalking(); // safety: patch disabled → vanilla switch path
 
             } else if (type == PacketType.Play.Server.RESPAWN) {
@@ -360,7 +361,8 @@ public final class SeamlessPacketListener implements PacketListener {
      */
     private void onRespawn(PacketSendEvent event, User user, SwitchState state) {
         WrapperPlayServerRespawn w = new WrapperPlayServerRespawn(event);
-        String newDimension = dimensionKey(w.getDimensionTypeRef());
+        String newDimension = dimensionKey(w.getDimensionTypeRef(),
+                state.adapter(() -> ProtocolAdapter.forClientVersion(user.getClientVersion())));
         boolean crossDimension = newDimension != null && state.clientDimension() != null
                 && !newDimension.equals(state.clientDimension());
         if (newDimension != null) {
@@ -415,23 +417,14 @@ public final class SeamlessPacketListener implements PacketListener {
     }
 
     /** Stable comparison key for a dimension type, whether name- or registry-id-encoded. */
-    private static String dimensionKey(DimensionTypeRef ref) {
-        if (ref == null) {
-            return null;
-        }
-        try {
-            ResourceLocation name = ref.getName();
-            if (name != null) {
-                return name.toString();
-            }
-        } catch (Exception ignored) {
-            // id-based ref (1.20.5+): fall through
-        }
-        try {
-            return "#" + ref.getId();
-        } catch (Exception e) {
-            return null;
-        }
+    private static String dimensionKey(DimensionTypeRef ref, ProtocolAdapter pa) {
+        if (ref == null) return null;
+        String name = null;
+        try { ResourceLocation rl = ref.getName(); name = rl == null ? null : rl.toString(); }
+        catch (Exception ignored) { }
+        Integer id = null;
+        try { id = ref.getId(); } catch (Exception e) { }
+        return ProtocolAdapter.dimensionKey(name, id, pa.era());
     }
 
     /**
@@ -569,18 +562,22 @@ public final class SeamlessPacketListener implements PacketListener {
             // The swirl PARTICLES around the player come from the entity's metadata, not from the
             // effect list — and the new server only sends non-default metadata, so a "no effects"
             // state never overwrites the old swirls. Reset the living-entity effect fields
-            // explicitly (1.20.5+: index 10 = effect particles list, 11 = ambient flag).
-            if (user.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_20_5)) {
-                sendSuppressed(user, state, new WrapperPlayServerEntityMetadata(
-                        state.clientEntityId(), List.of(
-                                new EntityData<>(10, EntityDataTypes.PARTICLES, List.of()),
-                                new EntityData<>(11, EntityDataTypes.BOOLEAN, false))));
-            } else {
-                // Pre-1.20.5: index 10 = potion effect color (0 = none), 11 = ambient flag.
-                sendSuppressed(user, state, new WrapperPlayServerEntityMetadata(
-                        state.clientEntityId(), List.of(
-                                new EntityData<>(10, EntityDataTypes.INT, 0),
-                                new EntityData<>(11, EntityDataTypes.BOOLEAN, false))));
+            // explicitly (indices/shape resolved per client era by ProtocolAdapter).
+            ProtocolAdapter pa = state.adapter(
+                    () -> ProtocolAdapter.forClientVersion(user.getClientVersion()));
+            List<EntityData<?>> meta = new ArrayList<>();
+            if (pa.effectMetadataResetSupported()) {
+                EntityData<?> colorOrParticles = pa.effectParticlesAreList()
+                        ? new EntityData<>(pa.effectColorIndex(), EntityDataTypes.PARTICLES, List.of())
+                        : new EntityData<>(pa.effectColorIndex(), EntityDataTypes.INT, 0);
+                meta.add(colorOrParticles);
+                meta.add(new EntityData<>(pa.effectAmbientIndex(), EntityDataTypes.BOOLEAN, false));
+            }
+            // Unsupported eras: REMOVE_ENTITY_EFFECT above already cleared the HUD effect; the swirl
+            // metadata lingers until the effect would naturally expire — accepted degradation.
+            if (!meta.isEmpty()) {
+                sendSuppressed(user, state,
+                        new WrapperPlayServerEntityMetadata(state.clientEntityId(), meta));
             }
         }
         ghostEffects.clear();

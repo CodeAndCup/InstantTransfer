@@ -2,6 +2,7 @@ package fr.cupcode.instanttransfer.switching;
 
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
 import com.github.retrooper.packetevents.resources.ResourceLocation;
+import fr.cupcode.instanttransfer.protocol.ProtocolAdapter;
 
 import java.util.Map;
 import java.util.Set;
@@ -157,6 +158,20 @@ public final class SwitchState {
      * Applied via a ChangeGameState packet on arrival, then reset to -1.
      */
     private volatile int pendingGamemode = -1;
+
+    /** Lazily resolved from the user's ClientVersion; stable for the connection's lifetime. */
+    private volatile ProtocolAdapter adapter;
+
+    public ProtocolAdapter adapter(java.util.function.Supplier<ProtocolAdapter> resolver) {
+        ProtocolAdapter a = adapter;
+        if (a == null) {
+            a = resolver.get();
+            adapter = a;
+        }
+        return a;
+    }
+
+    public ProtocolAdapter adapterIfResolved() { return adapter; }
 
     public void armGuard(long nowMillis) {
         teleportSeen = false;
