@@ -7,6 +7,7 @@ import fr.cupcode.instanttransfer.protocol.ProtocolAdapter;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Per-player mirror of what the client currently believes about the world, so that on a seamless
@@ -21,6 +22,16 @@ public final class SwitchState {
 
     /** Chunks the client currently has loaded. Key = packed (x,z). */
     private final Set<Long> loadedChunks = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Byte offset of the [int chunkX][int chunkZ] header inside a raw CHUNK_DATA body (0, or 1
+     * when packetevents exposes the body with the leading packet-id VarInt). Probed once on the
+     * first chunk of a connection, then reused; null until probed.
+     */
+    private volatile Integer chunkHeaderOffsetCache;
+
+    /** Monotonic index for the debug-only peek-vs-wrapper verification (first N chunks only). */
+    private final AtomicInteger chunkPeekChecks = new AtomicInteger();
 
     /** Entities the client currently has spawned (backend ids). */
     private final Set<Integer> trackedEntities = ConcurrentHashMap.newKeySet();
@@ -388,6 +399,18 @@ public final class SwitchState {
 
     public Set<Long> loadedChunks() {
         return loadedChunks;
+    }
+
+    public Integer chunkHeaderOffsetCache() {
+        return chunkHeaderOffsetCache;
+    }
+
+    public void chunkHeaderOffsetCache(int v) {
+        this.chunkHeaderOffsetCache = v;
+    }
+
+    public int nextChunkPeekCheck() {
+        return chunkPeekChecks.getAndIncrement();
     }
 
     public Set<Integer> trackedEntities() {

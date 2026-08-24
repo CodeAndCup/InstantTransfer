@@ -3,6 +3,7 @@ package fr.cupcode.instanttransfer.packet;
 import fr.cupcode.instanttransfer.InstantTransfer;
 import fr.cupcode.instanttransfer.config.PluginConfig;
 import fr.cupcode.instanttransfer.coord.CoordManager;
+import fr.cupcode.instanttransfer.protocol.ChunkCoordPeek;
 import fr.cupcode.instanttransfer.protocol.ProtocolAdapter;
 import fr.cupcode.instanttransfer.switching.SwitchManager;
 import fr.cupcode.instanttransfer.switching.SwitchState;
@@ -40,6 +41,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
+import io.netty.buffer.ByteBuf;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -138,10 +140,34 @@ public final class SeamlessPacketListener implements PacketListener {
                 state.ghostChunks().remove(key);
 
             } else if (type == PacketType.Play.Server.CHUNK_DATA) {
-                WrapperPlayServerChunkData w = new WrapperPlayServerChunkData(event);
-                int cx = w.getColumn().getX();
-                int cz = w.getColumn().getZ();
-                long key = SwitchState.chunkKey(cx, cz);
+                // Fast path: read (chunkX,chunkZ) straight off the raw body — constructing the
+                // full wrapper (sections/light decode) is the heaviest recurring cost here. The
+                // offset is probed once per connection (packetevents slicing may prepend the
+                // packet-id VarInt) and cached on the state.
+                ByteBuf body = (ByteBuf) event.getByteBuf(); // typed Object by PE 2.x; Netty buf here
+                Integer offC = state.chunkHeaderOffsetCache();
+                int off = offC != null ? offC : -1;
+                if (off < 0) {
+                    off = ChunkCoordPeek.detectHeaderOffset(body);
+                    // 0 also when probing failed: peek then misses and the wrapper path covers it.
+                    state.chunkHeaderOffsetCache(Math.max(off, 0));
+                }
+                long key = ChunkCoordPeek.peek(body, off);
+                int cx;
+                int cz;
+                if (key != -1L) {
+                    cx = SwitchState.chunkX(key);
+                    cz = SwitchState.chunkZ(key);
+                    if (config.debug() && state.nextChunkPeekCheck() < 10) {
+                        verifyChunkPeek(event, user, key); // one-time live sanity vs wrapper decode
+                    }
+                } else {
+                    // Unknown slicing/era: pay the wrapper cost rather than lose tracking accuracy.
+                    WrapperPlayServerChunkData w = new WrapperPlayServerChunkData(event);
+                    cx = w.getColumn().getX();
+                    cz = w.getColumn().getZ();
+                    key = SwitchState.chunkKey(cx, cz);
+                }
                 state.loadedChunks().add(key);
                 if (state.oldServerTalking()) {
                     state.ghostChunks().add(key); // late old-server chunk: one more ghost to clean
@@ -413,6 +439,25 @@ public final class SeamlessPacketListener implements PacketListener {
             logger.info("[InstantTransfer] cross-dimension switch for {}: Respawn fallback "
                     + "(vanilla world reload), seamless machinery stood down; removed {} ghost "
                     + "objectives, {} ghost teams", user.getName(), objectiveCount, teamCount);
+        }
+    }
+
+    /**
+     * One-time live sanity check (debug only): the raw peeked coords must match what the full
+     * wrapper decodes. A systematic mismatch means the header-offset assumption is wrong for this
+     * packetevents slicing — fix {@code chunkHeaderOffset} handling, never ship a shifted offset.
+     */
+    private void verifyChunkPeek(PacketSendEvent event, User user, long peekedKey) {
+        try {
+            WrapperPlayServerChunkData w = new WrapperPlayServerChunkData(event);
+            int wx = w.getColumn().getX();
+            int wz = w.getColumn().getZ();
+            boolean ok = wx == SwitchState.chunkX(peekedKey) && wz == SwitchState.chunkZ(peekedKey);
+            logger.info("[InstantTransfer] chunk peek verify for {}: peeked ({},{}) vs wrapper ({},{}){}",
+                    user.getName(), SwitchState.chunkX(peekedKey), SwitchState.chunkZ(peekedKey),
+                    wx, wz, ok ? "" : "  *** MISMATCH — wrapper fallback required ***");
+        } catch (Exception e) {
+            logger.warn("[InstantTransfer] chunk peek verify failed for {}: {}", user.getName(), e.toString());
         }
     }
 
