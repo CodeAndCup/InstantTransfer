@@ -5,6 +5,7 @@ import fr.cupcode.instanttransfer.config.PluginConfig;
 import fr.cupcode.instanttransfer.coord.CoordManager;
 import fr.cupcode.instanttransfer.protocol.ChunkCoordPeek;
 import fr.cupcode.instanttransfer.protocol.ProtocolAdapter;
+import fr.cupcode.instanttransfer.switching.LoadedChunkPruner;
 import fr.cupcode.instanttransfer.switching.SwitchManager;
 import fr.cupcode.instanttransfer.switching.SwitchState;
 import com.github.retrooper.packetevents.event.PacketListener;
@@ -360,10 +361,18 @@ public final class SeamlessPacketListener implements PacketListener {
                 state.rememberAbilities(w.isInGodMode(), w.isFlying(), w.isFlightAllowed(),
                         w.isInCreativeMode(), w.getFlySpeed(), w.getFOVModifier());
 
-            } else if (type == PacketType.Play.Server.PLAYER_POSITION_AND_LOOK
-                    && state.guardActive() && !state.teleportSeen()) {
-                onArrivalTeleport(event, user, state);
-                return;
+            } else if (type == PacketType.Play.Server.PLAYER_POSITION_AND_LOOK) {
+                // Self teleport: bound tracking memory (spec P4) — scan only when meaningfully large.
+                if (state.loadedChunks().size() > 1024) {
+                    WrapperPlayServerPlayerPositionAndLook w =
+                            new WrapperPlayServerPlayerPositionAndLook(event);
+                    LoadedChunkPruner.prune(state.loadedChunks(),
+                            (int) Math.floor(w.getX()) >> 4, (int) Math.floor(w.getZ()) >> 4, 32);
+                }
+                if (state.guardActive() && !state.teleportSeen()) {
+                    onArrivalTeleport(event, user, state);
+                    return;
+                }
             }
 
             // Safety net: if the arrival chunk doesn't arrive in time, send a position correction
