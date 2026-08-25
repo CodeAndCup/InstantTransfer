@@ -76,7 +76,7 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Respawn mode (robust fallback, brief flash) | `-Dvelocity.seamlessRespawn=true` | OFF (= zero screen) |
 | Proxy plugin master switch / debug | `plugins/instanttransfer/config.properties` | enabled |
 | **Guard timeout (ms)** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
-| Agent verbose logs ([DIAG-BACKEND], [COORD], [fall-guard]) | backend `plugins/InstantTransferAgent/config.yml` → `debug` | true |
+| Agent verbose logs ([DIAG-BACKEND], [COORD], [fall-guard]) | backend `plugins/InstantTransferAgent/config.yml` → `debug` | false |
 
 ## 5. Coverage audit — "everything JoinGame/Respawn used to reset for us"
 
@@ -97,10 +97,54 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |
 | Own tab-list entry (the client caches its PlayerInfo object inside the player entity; a remove/re-add cycle strands the cache → spectator noclip breaks, isSpectator/isCreative read a stale gamemode) | own-UUID filtered out of PLAYER_INFO_REMOVE + re-ADDs downgraded to in-place updates of the surviving entry | ✅ |
 | Different dimension between servers | patch compares the dimension type at each switch → automatic real-Respawn fallback (correct vanilla reload, brief screen); the plugin detects the Respawn and stands its machinery down; backend-relayed Respawns (portals, /execute in … tp, death) also update the tracked dimension | ✅ (fallback, not zero-screen: a client level cannot change sky/height in place) |
+| Backends older than 1.20.2 (no CONFIGURATION phase) | PLAY-state switch in the patch: backend JoinGame intercepted, never forwarded (see §7); Respawn decodable on every era via the StateRegistry `map(...)` table | ✅ |
+| Ghost effect swirls on eras with unverified living-entity metadata indices (< 1.20.2) | REMOVE_ENTITY_EFFECT still sent (HUD icon cleared); the swirl metadata reset is gracefully skipped instead of guessing historical indices — leftover swirls fade at the effect's natural expiry | ✅ (accepted degradation) |
 
 ## 6. Remaining work
 
-1. Broader version range (currently developed and tested against 1.21.x), then BungeeCord.
+1. Broader version range: implemented on this branch — supported range is now MC **1.13 → latest**
+   (see §7); next step is live validation across that matrix, then BungeeCord.
 2. Deployment note: each switch re-sends the player's whole view distance (~400 chunk packets);
    size backend heaps accordingly (≥ 2 GB recommended) — an undersized heap shows up as GC stalls
    ("Can't keep up!") and eventually OutOfMemoryError during chunk saves.
+
+## 7. Multi-version support & performance pass (2026-08-25)
+
+### One design, two eras
+The zero-screen switch now works on any homogeneous network from MC **1.13 to latest**, via two
+paths behind the same `doSwitch()`:
+- **≥ 1.20.2 — config-phase absorption**: the backend sends its CONFIGURATION phase and the patch
+  absorbs it entirely proxy-side (KnownPacks echoed, RegistrySync/Tags swallowed); the client
+  never leaves PLAY.
+- **1.13 – 1.20.1 — PLAY-state switch**: these versions have no configuration phase at all, so
+  there is nothing to absorb — the patch simply intercepts the backend's JoinGame in
+  `doSeamlessLegacySwitch` and never forwards it. Strictly *simpler* than the ≥ 1.20.2 path:
+  no 3-party handshake (client↔Velocity↔backend) to choreograph, no known-packs echo.
+Both paths rely on the Respawn decode table (`StateRegistry`, one `map(...)` line per version)
+so client-dimension tracking — and with it the cross-dimension Respawn fallback — work on every
+era. The companion plugins follow: the agent ships Java 8 bytecode / `api-version: 1.13` so it
+loads on the oldest supported servers.
+
+### Graceful degradation for unverified metadata eras
+Rule: never guess historical metadata indices. On eras whose living-entity effect-color/particle
+indices have not been verified (< 1.20.2), the swirl-particle metadata reset is skipped;
+REMOVE_ENTITY_EFFECT is still sent, so the HUD effect always clears — only the cosmetic swirl may
+linger until the effect would naturally expire. Accepted degradation, never corruption.
+
+### Performance pass
+Qualitative deltas shipped on this branch:
+- raw chunk-coordinate reads instead of boxed wrapper lookups on hot paths;
+- movement-packet peek instead of full decode where only movement is needed;
+- deferred ghost-chunk unloads, deduped against the destination's resends (a chunk the new server
+  re-sends is no longer unloaded then immediately re-delivered);
+- bounded loaded-chunk-tracking memory (tracking pruned on far teleports).
+
+### Measured results
+(pending — filled by the Task 12 matrix run)
+
+### Per-release maintenance contract
+Supporting a newly released Minecraft version costs one line: add the matching `map(...)` entry
+to the Respawn decode table in `velocity-patch/seamless.patch` (`StateRegistry`), run
+`scripts/check-protocol-tables.sh` (fails when the table lags packetevents' newest known version)
++ `scripts/validate-patch-hunks.sh` (validates the patch hunk counts), then rebuild the jar per
+[velocity-patch/README.md](../velocity-patch/README.md).

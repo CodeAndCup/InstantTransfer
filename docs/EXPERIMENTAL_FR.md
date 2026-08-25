@@ -78,7 +78,7 @@ moins invasif possible.
 | Mode Respawn (repli robuste, bref flash) | `-Dvelocity.seamlessRespawn=true` | OFF (= zéro écran) |
 | Coupe-circuit / debug du plugin proxy | `plugins/instanttransfer/config.properties` | activé |
 | **Timeout garde (ms)** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
-| Logs verbeux de l'agent ([DIAG-BACKEND], [COORD], [fall-guard]) | `plugins/InstantTransferAgent/config.yml` → `debug` | true |
+| Logs verbeux de l'agent ([DIAG-BACKEND], [COORD], [fall-guard]) | `plugins/InstantTransferAgent/config.yml` → `debug` | false |
 
 ## 5. Audit de couverture — « tout ce que JoinGame/Respawn resetait pour nous »
 
@@ -99,11 +99,58 @@ moins invasif possible.
 | GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |
 | Entrée tab-list du joueur lui-même (le client met en cache son objet PlayerInfo dans l'entité joueur ; un cycle remove/re-add orpheline le cache → le noclip spectateur casse, isSpectator/isCreative lisent un gamemode périmé) | UUID du joueur filtré des PLAYER_INFO_REMOVE + re-ADD rétrogradés en updates sur l'entrée survivante | ✅ |
 | Dimension différente entre serveurs | le patch compare le type de dimension à chaque switch → fallback automatique en vrai Respawn (reload vanilla correct, bref écran) ; le plugin détecte le Respawn et met sa mécanique en veille ; les Respawn relayés des backends (portails, /execute in … tp, mort) mettent aussi à jour la dimension trackée | ✅ (fallback, pas zéro-écran : un level client ne peut pas changer de ciel/hauteur sur place) |
+| Backends antérieurs à 1.20.2 (pas de phase CONFIGURATION) | switch en état PLAY dans le patch : JoinGame du backend intercepté, jamais transmis (voir §7) ; Respawn décodable sur toutes les versions via la table `map(...)` du StateRegistry | ✅ |
+| Swirls d'effets fantômes sur les versions aux indices de metadata non vérifiés (< 1.20.2) | REMOVE_ENTITY_EFFECT envoyé quand même (l'icône HUD est nettoyée) ; le reset des metadata de swirl est proprement ignoré plutôt que de deviner des indices historiques — les swirls restants disparaissent à l'expiration naturelle de l'effet | ✅ (dégradation acceptée) |
 
 ## 6. Travail restant
 
-1. Plage de versions élargie (développé et testé contre 1.21.x), puis BungeeCord.
+1. Plage de versions élargie : fait sur cette branche — la plage supportée est désormais MC
+   **1.13 → dernière** (voir §7) ; prochaine étape : validation live de cette matrice, puis BungeeCord.
 2. Note de déploiement : chaque switch renvoie toute la view distance du joueur (~400 paquets de
    chunks) ; dimensionner le heap des backends en conséquence (≥ 2 Go recommandé) — un heap trop
    petit se manifeste par des stalls GC (« Can't keep up! ») puis un OutOfMemoryError pendant les
    sauvegardes de chunks.
+
+## 7. Support multi-versions & passe de performances (2026-08-25)
+
+### Un design, deux ères de protocole
+Le switch zéro-écran fonctionne désormais sur tout réseau homogène de MC **1.13 à la dernière
+version**, via deux chemins derrière le même `doSwitch()` :
+- **≥ 1.20.2 — absorption de la phase config** : le backend envoie sa phase CONFIGURATION et le
+  patch l'absorbe entièrement côté proxy (KnownPacks renvoyé en écho, RegistrySync/Tags avalés) ;
+  le client ne quitte jamais PLAY.
+- **1.13 – 1.20.1 — switch en état PLAY** : ces versions n'ont pas de phase configuration du tout,
+  donc il n'y a rien à absorber — le patch intercepte simplement le JoinGame du backend dans
+  `doSeamlessLegacySwitch` et ne le transmet jamais. Strictement *plus simple* que le chemin
+  ≥ 1.20.2 : pas de handshake à 3 (client↔Velocity↔backend) à chorégraphier, pas d'écho known-packs.
+Les deux chemins s'appuient sur la table de décodage Respawn (`StateRegistry`, une ligne
+`map(...)` par version) pour que le tracking de dimension client — et avec lui le fallback
+cross-dimension vers Respawn — marche sur toutes les ères. Les plugins compagnons suivent :
+l'agent est compilé en bytecode Java 8 / `api-version: 1.13` pour se charger sur les serveurs
+les plus vieux supportés.
+
+### Dégradation gracieuse pour les metadata des ères non vérifiées
+Règle : ne jamais deviner des indices de metadata historiques. Sur les ères dont les indices
+effect-color/particles des entités vivantes n'ont pas été vérifiés (< 1.20.2), le reset des
+metadata de swirl est sauté ; REMOVE_ENTITY_EFFECT reste envoyé, donc l'effet HUD est toujours
+nettoyé — seul le swirl cosmétique peut subsister jusqu'à l'expiration naturelle de l'effet.
+Dégradation acceptée, jamais de corruption.
+
+### Passe de performances
+Deltas qualitatifs livrés sur cette branche :
+- lectures brutes des coordonnées de chunks au lieu de lookups boxed sur les chemins chauds ;
+- peek des paquets de mouvement au lieu d'un décodage complet là où seul le mouvement compte ;
+- unloads de chunks fantômes différés, dédoublonnés avec les resends de la destination (un chunk
+  que le nouveau serveur renvoie n'est plus déchargé puis immédiatement re-livré) ;
+- mémoire de tracking des chunks chargés bornée (tracking élagué aux téléports lointains).
+
+### Résultats mesurés
+(en attente — rempli par le run matrice de la Task 12)
+
+### Contrat de maintenance par release
+Supporter une nouvelle version de Minecraft coûte une ligne : ajoute l'entrée `map(...)`
+correspondante à la table de décodage Respawn dans `velocity-patch/seamless.patch`
+(`StateRegistry`), lance `scripts/check-protocol-tables.sh` (échoue si la table prend du retard
+sur la version la plus récente connue de packetevents) + `scripts/validate-patch-hunks.sh`
+(vérifie les compteurs des hunks du patch), puis rebuild le jar selon
+[velocity-patch/README_FR.md](../velocity-patch/README_FR.md).

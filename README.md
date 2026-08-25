@@ -31,8 +31,13 @@ Three cooperating components (all are required):
 | `proxy-plugin/` | proxy `plugins/` (+ [packetevents-velocity](https://github.com/retrooper/packetevents)) | Tracks what the client sees (chunks, entities, effects, abilities). On arrival: lets the teleport pass, **freezes the player with client-side flight** until the landing chunk is delivered (no falling through unloaded ground), then removes the previous server's ghosts (entities, chunks, potion effects) and **rewrites entity ids directionally** (backendId→clientId server→client, clientId→backendId client→server). **Timeout guard: on chunk delay sends position correction + keeps flight** (configurable, default 5 s). |
 | `backend-agent/` | every backend's `plugins/` (+ [packetevents-spigot](https://github.com/retrooper/packetevents)) | Arrival grace: cancels fall damage, temporarily allows flight server-side (so the freeze can never kick), revokes it the instant the proxy signals the arrival is complete (plugin-message channel). |
 
-Requirements for a seamless switch: backends on the **same Minecraft version** with **identical
-registries/datapacks**. Cross-dimension is now supported via auto-fallback to Respawn (brief flash).
+Requirements for a seamless switch: backends on the **same Minecraft version** (any of
+**1.13 – latest**, Spigot/Paper) with **identical registries/datapacks**. Cross-dimension is
+supported via auto-fallback to Respawn (brief flash).
+
+Per-release maintenance is one line: add the matching `map(...)` entry to the Respawn decode
+table in `velocity-patch/seamless.patch`, run `scripts/check-protocol-tables.sh` +
+`scripts/validate-patch-hunks.sh`, rebuild the jar (see [velocity-patch/README.md](velocity-patch/README.md)).
 
 ## Install
 
@@ -54,7 +59,7 @@ registries/datapacks**. Cross-dimension is now supported via auto-fallback to Re
 | Fallback mode: clean same-dimension Respawn (brief flash, no companion plugins needed) | `-Dvelocity.seamlessRespawn=true` | off (zero-screen) |
 | Proxy plugin master switch, debug logs | `plugins/instanttransfer/config.properties` | enabled |
 | **Guard timeout (ms) — on timeout sends position correction + keeps flight** | `plugins/instanttransfer/config.properties` → `guard-timeout-ms` | **5000** |
-| Backend agent verbose logs | `plugins/InstantTransferAgent/config.yml` → `debug` | true |
+| Backend agent verbose logs | `plugins/InstantTransferAgent/config.yml` → `debug` | false |
 
 ## Repository layout
 
@@ -68,6 +73,10 @@ docs/EXPERIMENTAL.md   R&D log: every approach tried, what failed and why, cover
 ## Status & known limits
 
 - ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs/cooldowns/scoreboards, **directional** entity-id remap, gamemode resync — validated live on 1.21.x (Velocity 3.4.0, Paper 1.21.4).
+- ✅ Supported range: MC **1.13 → latest** (homogeneous networks); ≥1.20.2 via config-phase
+  absorption, 1.13–1.20.1 via PLAY-state switch (JoinGame intercepted, never forwarded).
+- ✅ Performance pass: raw chunk-coord reads, movement-packet peek, deferred ghost-chunk
+  unloads (deduped against destination resends), bounded chunk-tracking memory.
 - ✅ **Cross-dimension supported** via auto-fallback to Respawn KEEP_ALL_DATA (brief loading flash, safe).
 - ⚠️ Identical registries/datapacks required between backends (different datapacks → do not use).
 - ⚠️ A player moving during the ~300 ms handshake may get a harmless server-side position correction (`moved too quickly` in logs).

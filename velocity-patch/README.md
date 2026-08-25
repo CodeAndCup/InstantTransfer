@@ -31,6 +31,11 @@ server switches. Full system overview: see the repository root [README](../READM
 | `-Dvelocity.seamlessSwitch=false` | Disable EVERYTHING (vanilla Velocity behavior) | seamless **ON** |
 | `-Dvelocity.seamlessRespawn=true` | Robust fallback: send a same-dimension KEEP_ALL_DATA Respawn (brief "loading terrain" flash, but a full clean client reset, no companion plugins needed) | **OFF** (= zero screen) |
 
+**Maintenance — newly released Minecraft version:** add the matching `map(...)` line to the
+Respawn decode table in `seamless.patch` (`StateRegistry`), run `scripts/check-protocol-tables.sh`
++ `scripts/validate-patch-hunks.sh`, then rebuild the jar
+(see [Rebuild from source](#rebuild-from-source)).
+
 ## Install
 
 1. Replace your Velocity jar with `velocity-instanttransfer.jar` (back up the old one).
