@@ -123,13 +123,13 @@ public final class EntityIdRemapper implements PacketListener {
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_VELOCITY) {
-                // Deliberately NOT handled (same class as ENTITY_METADATA): on this Paper 1.21.4
-                // network the PE 2.13.0 motion wrapper misparses frames (IOOBE one field past the
-                // end on some packets — and a silently MISALIGNED parse that still "succeeds" is
-                // worse: its re-encode emitted a truncated set_entity_motion that hard-crashed
-                // the client decoder). Byte-exact pass-through is always safe; cost: knockback
-                // aimed at the player keeps the backend id and is ignored by the client until
-                // packetevents is upgraded to a build whose 1.21.4 registry matches vanilla.
+                // Raw rewrite (see RawEntityIdRewriter): PE 2.13.0's motion wrapper misparses on
+                // this Paper 1.21.4 network — the in-place VarInt swap restores knockback remap
+                // with zero wrapper involvement and a guaranteed-rollback failure path.
+                if (RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state)) {
+                    // mutated buffer is forwarded as-is; no wrapper owns it
+                }
+
             } else if (type == PacketType.Play.Server.ENTITY_EFFECT) {
                 WrapperPlayServerEntityEffect w = new WrapperPlayServerEntityEffect(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
@@ -169,12 +169,11 @@ public final class EntityIdRemapper implements PacketListener {
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_METADATA) {
-                // Deliberately NOT handled: packetevents 2.13.0's V_1_21_4 metadata registry is
-                // incomplete (chokes on type id 32) — parsing throws mid-body, and ANY re-encode
-                // of these frames risks emitting malformed ones (client DecoderException on a
-                // 3-byte set_entity_data). Passing the packet through byte-exact is always safe;
-                // cost: self-targeted metadata (pose/flags/skin layers) keeps the backend id and
-                // is ignored by the client until the next health/attribute resync.
+                // Raw rewrite: PE 2.13.0's V_1_21_4 metadata registry is incomplete (type id 32
+                // unknown) — wrapper parse throws mid-body and any re-encode corrupts the frame.
+                // The raw path swaps ONLY the leading entity-id VarInt, payload untouched.
+                RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
+
             } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
                 if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityEquipment w = new WrapperPlayServerEntityEquipment(event);
@@ -204,14 +203,13 @@ public final class EntityIdRemapper implements PacketListener {
                 }
 
             } else if (type == PacketType.Play.Server.ENTITY_TELEPORT) {
-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
-                WrapperPlayServerEntityTeleport w = new WrapperPlayServerEntityTeleport(event);
-                remapSend(event, w.getEntityId(), w::setEntityId, state);
+                // Raw rewrite: same PE-skew family as velocity/metadata on 1.21.4.
+                RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
 
             } else if (type == PacketType.Play.Server.ENTITY_POSITION_SYNC) {
-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
-                WrapperPlayServerEntityPositionSync w = new WrapperPlayServerEntityPositionSync(event);
-                remapSend(event, w.getId(), w::setId, state);
+                // Raw rewrite: this is the type whose truncated frame crashed the client
+                // (3-byte entity_position_sync) — wrapper path is banned on this network.
+                RawEntityIdRewriter.rewriteSelfId((ByteBuf) event.getByteBuf(), state);
 
             } else if (type == PacketType.Play.Server.ENTITY_HEAD_LOOK) {
                 if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
@@ -308,6 +306,7 @@ public final class EntityIdRemapper implements PacketListener {
         // on, incoming traffic is the new server's (late old-server packets can no longer occur).
         state.markNewServerTalking();
         purgeStaleScoreboard(user, state);
+        purgeStaleEntities(user, state);
         String payload = new String(w.getData(), StandardCharsets.UTF_8);
         String[] parts = payload.split(":");
         if (parts.length < 2) {
@@ -363,6 +362,38 @@ public final class EntityIdRemapper implements PacketListener {
         } finally {
             state.suppressListener(false);
         }
+    }
+
+    /**
+     * Ghost entities from the previous server are destroyed the instant the ids message proves
+     * it is done talking — NOT at release(), whose cleanup leg demonstrably never reaches the
+     * client on this network (see ledger). DestroyEntities is world-independent and the ids are
+     * already client-space (the remapper only ever swaps the PLAYER's id; other entities keep
+     * the ids the old server itself sent), so this is safe to fire before any chunk arrives.
+     */
+    private void purgeStaleEntities(User user, SwitchState state) {
+        if (state.ghostEntities().isEmpty()) {
+            return;
+        }
+        int[] ids = new int[state.ghostEntities().size()];
+        int i = 0;
+        for (Integer gid : state.ghostEntities()) {
+            ids[i++] = gid;
+        }
+        state.suppressListener(true);
+        try {
+            user.sendPacket(new WrapperPlayServerDestroyEntities(ids));
+            if (config.debug()) {
+                logger.info("[InstantTransfer] purged {} ghost entit(y/ies) at switch", ids.length);
+            }
+        } catch (Exception e) {
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] ghost-entity purge failed: {}", e.toString());
+            }
+        } finally {
+            state.suppressListener(false);
+        }
+        state.ghostEntities().clear();
     }
 
     private interface IdSetter {
