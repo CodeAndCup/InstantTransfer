@@ -98,8 +98,8 @@ Let S = number of `/transfer` switches performed.
 | A4 | arrival chunk delivered, guard released | `grep "\[InstantTransfer\] seamless arrival for" run-<pair>.log` | S lines, each containing `(arrival chunk delivered)` or `(arrival chunk already loaded)`; this log IS the release() call |
 | A5 | freeze engaged where needed | `grep -c "arrival teleport for .* freeze on" run-<pair>.log` | == S minus `(arrival chunk already loaded)` fast-path releases (those never froze) |
 | A6 | deferred unload flush | `grep -o "flushed [0-9]* deferred chunk unloads" run-<pair>.log` | record every N (needs DEBUG log4j override); N must be far below the audit baseline (~one netty write per ghost chunk, hundreds per switch pre-change) |
-| A7 | peek sanity (first-10 comparisons per connection) | `grep "chunk peek verify for" run-<pair>.log`; `grep "movement peek verify for" run-<pair>.log` | every line EQUALITY (`peeked == wrapper`); ANY `*** MISMATCH` -> stop, fix offset handling, do not trust fast paths |
-| A8 | zero errors | `grep -cE "remap error|listener error|guard timeout|bad ids payload|MISMATCH" run-<pair>.log` | 0 |
+| A7 | peek sanity (first-10 comparisons per connection) | `grep "chunk peek verify for" run-<pair>.log`; `grep "movement peek verify for" run-<pair>.log` | >=10 lines per connection per pattern; every line EQUALITY (`peeked == wrapper`); ANY `*** MISMATCH` -> stop, fix offset handling, do not trust fast paths |
+| A8 | zero errors | `grep -cE "remap error|listener error|guard timeout|bad ids payload|MISMATCH|verify failed" run-<pair>.log` | 0 |
 
 Legacy-path expectation by era (mirrors A3): `[seamless] doSeamlessLegacySwitch` may appear
 ONLY on pairs < 1.20.2 (1.13.2, 1.16.5, 1.18.2, 1.20.1); on 1.20.2+ its appearance is a FAIL
@@ -140,7 +140,7 @@ docker compose up -d proxy
 docker compose cp proxy:/app/proxy-after.jfr .
 ```
 
-Analyze (`jfr print --events jdk.ExecutionSample,jdk.AllocationRealloc,proxy-after.jfr` or JMC):
+Analyze (`jfr print --events jdk.ExecutionSample,jdk.AllocationRealloc proxy-after.jfr` or JMC):
 
 - p99 listener cost proxy metric: zero `remap error` / guard anomalies during capture
   (assertion A8 must hold throughout);
