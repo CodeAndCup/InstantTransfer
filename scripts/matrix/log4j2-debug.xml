@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Root logger at DEBUG so slf4j logger.debug lines from the InstantTransfer proxy plugin
+     become visible — notably "[InstantTransfer] flushed N deferred chunk unloads".
+     Activate via the compose EXTRA_JVM_OPTS override:
+
+       EXTRA_JVM_OPTS="-Dlog4j.configurationFile=/app/log4j2-debug.xml" docker compose up -d proxy
+
+     (file is mounted read-only at /app/log4j2-debug.xml by docker-compose.yml) -->
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%thread/%level] %msg%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Root level="DEBUG">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

@@ -1,0 +1,7 @@
+# InstantTransfer agent config — mounted read-only at
+# /data/plugins/InstantTransferAgent/config.yml on BOTH backends by docker-compose.yml.
+# The shipped agent jar has no bundled config.yml and defaults debug to false; this mount
+# guarantees the live-session diagnostics:
+#   - "[COORD] received ..." plugin-message logs (AgentPlugin)
+#   - "[fall-guard] arrival grace armed ..." + AgentPacketListener packet logs
+debug: true

@@ -1,0 +1,48 @@
+# InstantTransfer matrix rig — Velocity config template.
+# Mounted read-only at /app/velocity.toml by docker-compose.yml.
+#
+# WARNING: online-mode = false (offline rig, NO authentication — anyone can join with any
+# name). Intended for an isolated docker lab only; NEVER expose this proxy to the internet.
+#
+# Backend addresses use the compose service DNS aliases (network "matrix"):
+# backend-a / backend-b resolve to the two Paper containers, each listening on 25565.
+
+config-version = "2.7"
+bind = "0.0.0.0:25565"
+motd = "&aInstantTransfer matrix rig"
+show-max-players = 20
+online-mode = false
+force-key-authentication = false
+prevent-client-proxy-connections = false
+
+player-info-forwarding-mode = "NONE"
+forwarding-secret-file = "forwarding.secret"
+announce-forge = false
+kick-existing-players = true
+ping-passthrough = "DISABLED"
+
+[servers]
+backend-a = "backend-a:25565"
+backend-b = "backend-b:25565"
+
+# try-first ordering: fresh clients land on backend-a
+try = ["backend-a", "backend-b"]
+
+[forced-hosts]
+
+[advanced]
+compression-threshold = 256
+compression-level = 6
+tcp-fast-open = false
+bungee-plugin-message-channel = true
+show-ping-requests = false
+failover-on-unexpected-server-disconnect = true
+announce-proxy-commands = true
+log-command-executions = false
+log-player-connections = true
+
+[query]
+enabled = false
+port = 25577
+map = "InstantTransfer"
+show-plugins = false

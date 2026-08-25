@@ -1,0 +1,100 @@
+# InstantTransfer multi-version matrix rig (Task 12) — rig files only, results are
+# recorded in docs during the later live session.
+#
+# Two Paper backends (any SAME-version pair) behind the patched Velocity proxy:
+#
+#   MC_VERSION_A=1.20.4 MC_VERSION_B=1.20.4 docker compose up -d
+#   (short aliases MC_A / MC_B also work — see RUNBOOK.md)
+#
+# PREREQUISITES — jars referenced below are NOT committed here:
+#   mvn -q package                     # repo root -> proxy-plugin/target/InstantTransfer-0.1.0.jar
+#                                      #             backend-agent/spigot/target/instanttransfer-agent-0.1.0.jar
+#   dropins/spigot/packetevents-spigot.jar       # download + rename, see dropins/README.md
+#   dropins/velocity/packetevents-velocity.jar   # download + rename, see dropins/README.md
+#
+# OFFLINE LAB RIG: online-mode=false everywhere (no Mojang auth). NEVER expose this
+# stack to the internet.
+
+name: instanttransfer-matrix
+
+services:
+  # Patched Velocity (zero-screen seamless switch). Runs the repo's pre-built jar on a
+  # plain JRE so JVM flags stay fully under our control (JFR capture via EXTRA_JVM_OPTS).
+  proxy:
+    image: eclipse-temurin:21-jre        # velocity-instanttransfer.jar (3.6.0-SNAPSHOT) needs Java 21
+    working_dir: /app
+    # $$ escapes compose interpolation: EXTRA_JVM_OPTS resolves INSIDE the container,
+    # so `EXTRA_JVM_OPTS=... docker compose up` from the shell flows through untouched.
+    command: sh -c 'exec java -Xms128m -Xmx768m $$EXTRA_JVM_OPTS -jar velocity-instanttransfer.jar'
+    ports:
+      - "25565:25565"
+    environment:
+      EXTRA_JVM_OPTS: ${EXTRA_JVM_OPTS:-}
+      # e.g. JFR:        EXTRA_JVM_OPTS="-XX:StartFlightRecording=filename=/app/proxy-after.jfr,duration=10m,settings=profile"
+      # e.g. DEBUG logs: EXTRA_JVM_OPTS="-Dlog4j.configurationFile=/app/log4j2-debug.xml"
+    volumes:
+      - ../velocity-patch/velocity-instanttransfer.jar:/app/velocity-instanttransfer.jar:ro
+      - ./velocity.toml:/app/velocity.toml:ro
+      - ../../proxy-plugin/target/InstantTransfer-0.1.0.jar:/app/plugins/InstantTransfer-0.1.0.jar:ro
+      - ./dropins/velocity/packetevents-velocity.jar:/app/plugins/packetevents-velocity.jar:ro
+      # debug=true guaranteed for the live session (peek verifies, arrival/freeze logs)
+      - ./proxy-config.properties:/app/plugins/instanttransfer/config.properties:ro
+      # mounted so it can be activated with the DEBUG-logs EXTRA_JVM_OPTS above; surfaces
+      # logger.debug lines such as "[InstantTransfer] flushed N deferred chunk unloads"
+      - ./log4j2-debug.xml:/app/log4j2-debug.xml:ro
+    depends_on:
+      - backend-a
+      - backend-b
+    networks:
+      - matrix
+
+  # Paper backend A — itzg/minecraft-server auto-selects the right JVM for VERSION.
+  backend-a:
+    image: itzg/minecraft-server:latest
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: ${MC_VERSION_A:-${MC_A:-1.21.4}}
+      MEMORY: 2G            # >= 2G recommended: each switch re-sends the whole view distance
+      ONLINE_MODE: "false"  # offline lab rig — matches velocity.toml online-mode = false
+      GUI: "false"
+    volumes:
+      # world volume is tagged with the version: fresh world per version pair, warm reruns
+      # of the same pair (never reuse one world across versions — no downgrades)
+      - a-data:/data
+      - ../../backend-agent/spigot/target/instanttransfer-agent-0.1.0.jar:/data/plugins/InstantTransferAgent.jar:ro
+      - ./dropins/spigot/packetevents-spigot.jar:/data/plugins/packetevents-spigot.jar:ro
+      # agent has no bundled config.yml and defaults debug=false; this mount turns on
+      # [COORD]/[fall-guard] diagnostics + AgentPacketListener for the live session
+      - ./agent-config.yml:/data/plugins/InstantTransferAgent/config.yml:ro
+    networks:
+      matrix:
+        aliases: [backend-a]
+
+  # Paper backend B — identical shape, independent version knob and world volume.
+  backend-b:
+    image: itzg/minecraft-server:latest
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: ${MC_VERSION_B:-${MC_B:-1.21.4}}
+      MEMORY: 2G
+      ONLINE_MODE: "false"
+      GUI: "false"
+    volumes:
+      - b-data:/data
+      - ../../backend-agent/spigot/target/instanttransfer-agent-0.1.0.jar:/data/plugins/InstantTransferAgent.jar:ro
+      - ./dropins/spigot/packetevents-spigot.jar:/data/plugins/packetevents-spigot.jar:ro
+      - ./agent-config.yml:/data/plugins/InstantTransferAgent/config.yml:ro
+    networks:
+      matrix:
+        aliases: [backend-b]
+
+volumes:
+  a-data:
+    name: it-matrix-${MC_VERSION_A:-${MC_A:-1.21.4}}-a
+  b-data:
+    name: it-matrix-${MC_VERSION_B:-${MC_B:-1.21.4}}-b
+
+networks:
+  matrix: {}
