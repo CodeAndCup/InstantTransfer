@@ -164,8 +164,16 @@ public final class EntityIdRemapper implements PacketListener {
 
             } else if (type == PacketType.Play.Server.ENTITY_METADATA) {
                 if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
-                WrapperPlayServerEntityMetadata w = new WrapperPlayServerEntityMetadata(event);
-                remapSend(event, w.getEntityId(), w::setEntityId, state);
+                try {
+                    WrapperPlayServerEntityMetadata w = new WrapperPlayServerEntityMetadata(event);
+                    remapSend(event, w.getEntityId(), w::setEntityId, state);
+                } catch (Exception parseFailure) {
+                    // Newer MC versions ship metadata types this packetevents build cannot parse
+                    // (e.g. type 32 on 1.21.4). Hand-rewriting the leading varint would risk
+                    // corrupting the frame mid-buffer (a far worse failure mode), so the packet
+                    // passes through untouched: a self-targeted update may carry the backend id
+                    // and be ignored client-side until the next resync — cosmetic only.
+                }
 
             } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
                 if (irrelevantByPeek(event, state, movementOffset(event, state))) return;

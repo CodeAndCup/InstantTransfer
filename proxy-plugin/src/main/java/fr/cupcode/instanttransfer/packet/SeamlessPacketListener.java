@@ -166,20 +166,35 @@ public final class SeamlessPacketListener implements PacketListener {
                 // packet-id VarInt) and cached on the state.
                 ByteBuf body = (ByteBuf) event.getByteBuf(); // typed Object by PE 2.x; Netty buf here
                 Integer offC = state.chunkHeaderOffsetCache();
-                int off = offC != null ? offC : -1;
-                if (off < 0) {
-                    off = ChunkCoordPeek.detectHeaderOffset(body);
-                    // 0 also when probing failed: peek then misses and the wrapper path covers it.
-                    state.chunkHeaderOffsetCache(Math.max(off, 0));
+                long key;
+                if (offC != null && offC == -1) {
+                    // This connection's slicing proved unpeekable earlier: straight to wrapper.
+                    key = -1L;
+                } else {
+                    int off = offC != null ? offC : -1;
+                    if (off < 0) {
+                        // First chunk of the connection: solve the offset against wrapper TRUTH —
+                        // a bounds-only guess could cache a shifted (poisoned) offset when the
+                        // packet-id VarInt is present but wasn't at probe time (or vice versa).
+                        int solved = -1;
+                        try {
+                            WrapperPlayServerChunkData w = new WrapperPlayServerChunkData(event);
+                            solved = solveOffsetAgainstTruth(body, w.getColumn().getX(), w.getColumn().getZ());
+                        } catch (Exception ignored) {
+                            // wrapper construction itself failed: leave -1, per-packet fallback below
+                        }
+                        state.chunkHeaderOffsetCache(solved); // -1 => always-wrapper for this user
+                        off = solved;
+                    }
+                    key = off < 0 ? -1L : ChunkCoordPeek.peek(body, off);
                 }
-                long key = ChunkCoordPeek.peek(body, off);
                 int cx;
                 int cz;
                 if (key != -1L) {
                     cx = SwitchState.chunkX(key);
                     cz = SwitchState.chunkZ(key);
                     if (config.debug() && state.nextChunkPeekCheck() < 10) {
-                        verifyChunkPeek(event, user, key); // one-time live sanity vs wrapper decode
+                        key = verifyChunkPeek(event, user, key, body, state); // sanity + offset self-heal
                     }
                 } else {
                     // Unknown slicing/era: pay the wrapper cost rather than lose tracking accuracy.
@@ -477,22 +492,45 @@ public final class SeamlessPacketListener implements PacketListener {
     }
 
     /**
-     * One-time live sanity check (debug only): the raw peeked coords must match what the full
-     * wrapper decodes. A systematic mismatch means the header-offset assumption is wrong for this
-     * packetevents slicing — fix {@code chunkHeaderOffset} handling, never ship a shifted offset.
+     * Live sanity check (debug only): the raw peeked coords must match what the full wrapper
+     * decodes. On MISMATCH the header offset is RE-SOLVED against the wrapper truth (packetevents
+     * slicing can differ per packet — a leading packet-id VarInt present or already consumed),
+     * the cache is updated, and the wrapper-decoded key is returned so THIS packet is tracked
+     * correctly too; the fast path self-heals instead of shipping a shifted offset.
      */
-    private void verifyChunkPeek(PacketSendEvent event, User user, long peekedKey) {
+    private long verifyChunkPeek(PacketSendEvent event, User user, long peekedKey,
+                                 ByteBuf body, SwitchState state) {
         try {
             WrapperPlayServerChunkData w = new WrapperPlayServerChunkData(event);
             int wx = w.getColumn().getX();
             int wz = w.getColumn().getZ();
-            boolean ok = wx == SwitchState.chunkX(peekedKey) && wz == SwitchState.chunkZ(peekedKey);
-            logger.info("[InstantTransfer] chunk peek verify for {}: peeked ({},{}) vs wrapper ({},{}){}",
+            long truthKey = SwitchState.chunkKey(wx, wz);
+            boolean ok = peekedKey == truthKey;
+            if (ok) {
+                return peekedKey;
+            }
+            int solved = solveOffsetAgainstTruth(body, wx, wz);
+            state.chunkHeaderOffsetCache(solved); // -1 => always-wrapper until re-probed
+            logger.info("[InstantTransfer] chunk peek verify for {}: peeked ({},{}) vs wrapper ({},{})"
+                            + "  *** MISMATCH — offset {} ***",
                     user.getName(), SwitchState.chunkX(peekedKey), SwitchState.chunkZ(peekedKey),
-                    wx, wz, ok ? "" : "  *** MISMATCH — wrapper fallback required ***");
+                    wx, wz, solved >= 0 ? ("re-solved to " + solved) : "unpeekable, wrapper-always");
+            return truthKey; // track THIS packet correctly regardless of the broken fast path
         } catch (Exception e) {
             logger.warn("[InstantTransfer] chunk peek verify failed for {}: {}", user.getName(), e.toString());
+            return peekedKey;
         }
+    }
+
+    /** Finds the body offset (0..2) whose peeked pair equals the wrapper-decoded coords; -1 if none. */
+    private static int solveOffsetAgainstTruth(ByteBuf body, int wx, int wz) {
+        long truth = SwitchState.chunkKey(wx, wz);
+        for (int o = 0; o <= 2; o++) {
+            if (ChunkCoordPeek.peek(body, o) == truth) {
+                return o;
+            }
+        }
+        return -1;
     }
 
     /** Stable comparison key for a dimension type, whether name- or registry-id-encoded. */
