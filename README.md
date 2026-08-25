@@ -17,9 +17,11 @@ no loading screen, the world simply morphs around the player.
 ## ⚠️ Experimental — do NOT use in production
 
 This project patches **Velocity's internals** and rewrites live protocol traffic. It is a working
-proof of concept, tested on a small 1.21.x network — not a hardened product. Expect breakage with:
-untested Minecraft versions, mods, other packet-level plugins, cross-dimension travel, or different
-registries/datapacks between backends. **Use it on test networks, at your own risk.**
+proof of concept — repeatedly validated live on a small Paper 1.21.4 network (repeated zero-screen
+round-trips, knockback, death respawn relay, cross-dimension fallback) — but **not a hardened
+product**. The < 1.20.2 legacy path is implemented and unit-covered yet not yet exercised on real
+old servers. Expect breakage with: untested Minecraft versions, mods, other packet-level plugins,
+or different registries/datapacks between backends. **Use it on test networks, at your own risk.**
 
 ## How it works
 
@@ -72,10 +74,11 @@ docs/EXPERIMENTAL.md   R&D log: every approach tried, what failed and why, cover
 
 ## Status & known limits
 
-- ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs/cooldowns/scoreboards, **directional** entity-id remap, gamemode resync — validated live on 1.21.x (Velocity 3.4.0, Paper 1.21.4).
+- ✅ Zero screen, no fall damage, no ghost entities/chunks/effects/weather/GUIs/cooldowns/scoreboards, **directional** entity-id remap, gamemode resync — validated live on Paper 1.21.4 across repeated round-trips including **knockback, death respawn relay and cross-dimension fallback** (Velocity patched 3.6.0-SNAPSHOT core).
+- ✅ Full ghost lifecycle on **every** post-join switch (`/server`, `/transfer`, API alike): snapshot at arm → purge at switch (scoreboard + entities) → release cleanup on arrival-chunk delivery (97–472 ghost chunks destroyed per switch in tests).
 - ✅ Supported range: MC **1.13 → latest** (homogeneous networks); ≥1.20.2 via config-phase
-  absorption, 1.13–1.20.1 via PLAY-state switch (JoinGame intercepted, never forwarded).
-- ✅ Performance pass: raw chunk-coord reads, movement-packet peek, deferred ghost-chunk
+  absorption, 1.13–1.20.1 via PLAY-state switch (JoinGame intercepted, never forwarded) — legacy path implemented + unit-covered, live matrix pending.
+- ✅ Performance pass: raw chunk-coord reads, raw entity-id rewrite for metadata/velocity/teleport/position-sync (packetevents-wrapper-free, rollback-safe), deferred ghost-chunk
   unloads (deduped against destination resends), bounded chunk-tracking memory.
 - ✅ **Cross-dimension supported** via auto-fallback to Respawn KEEP_ALL_DATA (brief loading flash, safe).
 - ⚠️ Identical registries/datapacks required between backends (different datapacks → do not use).

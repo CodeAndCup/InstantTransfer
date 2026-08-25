@@ -94,18 +94,20 @@ moins invasif possible.
 | Tab-list, boss bars | gérés par Velocity au switch | ✅ automatique |
 | View/simulation distance, recettes, advancements | renvoyés au join | ✅ automatique |
 | Cooldowns d'items (ender pearl, bouclier…) | tracking SET_COOLDOWN → mis à zéro à la release (un vrai join ne les transporte jamais) | ✅ |
-| Scoreboard/objectifs/équipes de l'ancien serveur | tracking SCOREBOARD_OBJECTIVE/TEAMS → REMOVE à la release ; un re-CREATE d'un nom encore fantôme reçoit d'abord un REMOVE injecté (le client vanilla JETTE une exception sur un CREATE d'objectif dupliqué → kick « network error ») ; le fallback Respawn les nettoie aussi (le scoreboard est la seule chose qui survit à un respawn côté client) | ✅ |
+| Scoreboard/objectifs/équipes de l'ancien serveur | TROIS ceintures : (1) REMOVE à la release ; (2) purge au moment du switch (message ids) — le scoreboard est connection-scoped côté client et une destination sans son propre scoreboard ne déclenchera jamais de re-CREATE ; (3) un re-CREATE d'un nom connu du client reçoit d'abord un REMOVE injecté, conditionné sur le set ACTIVE (miroir de la vérité client), pas sur le bookkeeping fantôme — le client vanilla JETTE une exception sur un CREATE d'objectif dupliqué → kick « network error » | ✅ |
 | Météo fantôme (pluie de l'ancien serveur) | tracking météo CHANGE_GAME_STATE → END_RAINING + niveaux pluie/orage à zéro à la release si le nouveau serveur n'a rien envoyé | ✅ |
 | GUI/coffre ouvert pendant le switch | tracking OPEN_WINDOW/OPEN_HORSE_WINDOW → CloseWindow à la release | ✅ |
 | Entrée tab-list du joueur lui-même (le client met en cache son objet PlayerInfo dans l'entité joueur ; un cycle remove/re-add orpheline le cache → le noclip spectateur casse, isSpectator/isCreative lisent un gamemode périmé) | UUID du joueur filtré des PLAYER_INFO_REMOVE + re-ADD rétrogradés en updates sur l'entrée survivante | ✅ |
 | Dimension différente entre serveurs | le patch compare le type de dimension à chaque switch → fallback automatique en vrai Respawn (reload vanilla correct, bref écran) ; le plugin détecte le Respawn et met sa mécanique en veille ; les Respawn relayés des backends (portails, /execute in … tp, mort) mettent aussi à jour la dimension trackée | ✅ (fallback, pas zéro-écran : un level client ne peut pas changer de ciel/hauteur sur place) |
-| Backends antérieurs à 1.20.2 (pas de phase CONFIGURATION) | switch en état PLAY dans le patch : JoinGame du backend intercepté, jamais transmis (voir §7) ; Respawn décodable sur toutes les versions via la table `map(...)` du StateRegistry | ✅ |
+| Entités fantômes du serveur précédent | détruites au moment du switch (message ids) : un batch `DestroyEntities` en ids espace-client, indépendant du monde, tiré bien avant le chunk d'arrivée — pas seulement à la release (sur réseaux réels la jambe release peut être affamée ; voir §7 incident) | ✅ |
+| Backends antérieurs à 1.20.2 (pas de phase CONFIGURATION) | switch en état PLAY dans le patch : JoinGame du backend intercepté, jamais transmis (voir §7) ; Respawn décodable sur toutes les versions via la table `map(...)` du StateRegistry | ✅ implémenté + couvert unitairement, matrice live en attente |
 | Swirls d'effets fantômes sur les versions aux indices de metadata non vérifiés (< 1.20.2) | REMOVE_ENTITY_EFFECT envoyé quand même (l'icône HUD est nettoyée) ; le reset des metadata de swirl est proprement ignoré plutôt que de deviner des indices historiques — les swirls restants disparaissent à l'expiration naturelle de l'effet | ✅ (dégradation acceptée) |
 
 ## 6. Travail restant
 
-1. Plage de versions élargie : fait sur cette branche — la plage supportée est désormais MC
-   **1.13 → dernière** (voir §7) ; prochaine étape : validation live de cette matrice, puis BungeeCord.
+1. Plage de versions élargie : fait — la plage supportée est désormais MC
+   **1.13 → dernière** (voir §7) ; ≥ 1.20.2 est validé live ; le chemin PLAY-state < 1.20.2
+   attend la matrice live, puis BungeeCord.
 2. Note de déploiement : chaque switch renvoie toute la view distance du joueur (~400 paquets de
    chunks) ; dimensionner le heap des backends en conséquence (≥ 2 Go recommandé) — un heap trop
    petit se manifeste par des stalls GC (« Can't keep up! ») puis un OutOfMemoryError pendant les
@@ -144,13 +146,56 @@ Deltas qualitatifs livrés sur cette branche :
   que le nouveau serveur renvoie n'est plus déchargé puis immédiatement re-livré) ;
 - mémoire de tracking des chunks chargés bornée (tracking élagué aux téléports lointains).
 
+### Validation live & l'incident de skew packetevents (2026-08-25, Paper 1.21.4 ×2)
+Le premier run sur vrai réseau a exposé un skew protocole entre **packetevents 2.13.0 et Paper
+1.21.4**, avec trois symptômes distincts pour une même racine :
+1. le parsing d'`ENTITY_METADATA` jetait sur un type de metadata inconnu (id 32) — le registre
+   V_1_21_4 de PE est incomplet ;
+2. les buffers d'événements portent parfois encore le VarInt d'ID de paquet en tête (prouvé
+   empiriquement par la sonde d'offset d'en-tête chunk), donc les parses de wrappers
+   désalignent d'un octet — et un parse désaligné qui « réussit » quand même ré-encode une trame
+   TRONQUÉE (`set_entity_motion`, `entity_position_sync` à 3 octets) qui crashe durement le
+   décodeur du client vanilla.
+
+**Réponse : arrêter d'utiliser les wrappers pour les types affectés.** `RawEntityIdRewriter`
+échange UNIQUEMENT le VarInt d'entity-id en tête, directement dans le buffer de l'événement, en
+testant les deux hypothèses de slicing (avec / sans pid), en sauvegardant les octets originaux
+d'abord, en vérifiant l'écriture, et en restaurant sur toute anomalie — un rewrite raté dégénère
+en pass-through, jamais en corruption. Appliqué à METADATA / VELOCITY / TELEPORT /
+POSITION_SYNC ; les wrappers restants (effets, attributs, équipement…) n'ont montré aucun skew
+et restent wrapper-based. Knockback et remap self-metadata sont ainsi entièrement restaurés,
+sans attendre un upgrade packetevents.
+
+**Second incident : les switches non gérés.** Le cycle fantôme (snapshot → purge → release)
+n'était armé que pour les requêtes `/transfer`/API ; un switch via `/server` recevait le patch
+zéro-écran et le remap d'ids mais AUCUN cycle — les entités du serveur précédent survivaient sur
+la destination indéfiniment, et toutes les jambes de cleanup release paraissaient mortes.
+Règle désormais : TOUT switch post-join arme snapshot + garde ; le flag instant-transfer ne
+gate plus que les événements API. Cela a aussi ressuscité la ligne de log release
+(`seamless arrival … removed N ghost chunks`) jamais observée auparavant.
+
+**Durcissement scoreboard** issu du même run : l'état connection-scoped côté client signifie
+qu'une destination SANS son propre scoreboard ne déclenchera jamais de re-CREATE — la seule
+suppression à la release peut donc laisser un sidebar périmé visible indéfiniment. Trois
+ceintures désormais : purge au ids-time (idempotente), garde anti-doublon keyée sur ACTIVE,
+cleanup de release.
+
 ### Résultats mesurés
-(en attente — rempli par le run matrice de la Task 12)
+Rig live mono-joueur, Paper 1.21.4 ×2 backends derrière le Velocity patché, allers-retours
+S1↔S2 répétés (2026-08-25) :
+- fenêtre de gel (téléport arrivée → unfreeze) : **≈160–260 ms** par switch ;
+- détection d'arrivée : « arrival chunk delivered » sur 100 % des switchs observés ;
+- cleanup fantômes à la release : **97–472 ghost chunks détruits par switch** (selon la view
+  distance), 4 entités fantômes purgées au switch, 1 objectif scoreboard purgé ;
+- stabilité : zéro crash / zéro kick sur les allers-retours répétés du build final, y compris
+  coups de knockback, relais de respawn après mort et fallback cross-dimension.
+Les runs matrice pour les ères < 1.20.2 restent en attente (voir RUNBOOK).
 
 ### Contrat de maintenance par release
 Supporter une nouvelle version de Minecraft coûte une ligne : ajoute l'entrée `map(...)`
 correspondante à la table de décodage Respawn dans `velocity-patch/seamless.patch`
-(`StateRegistry`), lance `scripts/check-protocol-tables.sh` (échoue si la table prend du retard
-sur la version la plus récente connue de packetevents) + `scripts/validate-patch-hunks.sh`
+(`StateRegistry`), lance `scripts/check-protocol-tables.sh` (surveille que la table ne prend pas
+de retard sur packetevents — via une constante dérivée avec un fallback `EXPECTED_NEWEST`
+documenté dans le script) + `scripts/validate-patch-hunks.sh`
 (vérifie les compteurs des hunks du patch), puis rebuild le jar selon
 [velocity-patch/README_FR.md](../velocity-patch/README_FR.md).

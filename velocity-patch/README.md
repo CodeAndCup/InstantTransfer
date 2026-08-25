@@ -20,6 +20,9 @@ server switches. Full system overview: see the repository root [README](../READM
    the client. The world morphs in place from the new server's chunks + teleport. The companion
    proxy plugin (InstantTransfer) freezes the player during the chunk gap, cleans up ghosts and
    swaps entity ids; the backend agent guards against fall damage and flight kicks.
+   On **1.13–1.20.1** (no CONFIGURATION phase at all), `doSeamlessLegacySwitch()` does the same
+   purely inside PLAY: the backend's JoinGame is intercepted and never forwarded, and the same
+   synthetic ids announcement arms the companion plugins.
 3. **Ids/gamemode announcement** — at every seamless switch the patch writes a synthetic plugin
    message (`instanttransfer:ids`, payload `clientId:backendId:gamemode`) that the proxy plugin
    intercepts (the client never sees it) to drive the entity-id remap and the gamemode resync.

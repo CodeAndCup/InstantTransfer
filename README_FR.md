@@ -17,9 +17,12 @@ backends : aucun écran de chargement, le monde se transforme simplement autour 
 ## ⚠️ Expérimental — à NE PAS mettre en production
 
 Ce projet patche les **internes de Velocity** et réécrit le trafic protocole en direct. C'est un
-proof of concept fonctionnel, testé sur un petit réseau 1.21.x — pas un produit durci. Attendez-vous
+proof of concept fonctionnel — validé de manière répétée en live sur un petit réseau Paper 1.21.4
+(allers-retours zéro-écran, knockback, relais de respawn après mort, fallback cross-dimension) —
+mais **pas un produit durci**. Le chemin legacy < 1.20.2 est implémenté et couvert unitairement,
+mais pas encore exercé sur de vrais vieux serveurs. Attendez-vous
 à de la casse avec : des versions Minecraft non testées, des mods, d'autres plugins packet-level,
-les changements de dimension, ou des registres/datapacks différents entre backends.
+ou des registres/datapacks différents entre backends.
 **À utiliser sur des réseaux de test, à vos risques et périls.**
 
 ## Fonctionnement
@@ -75,10 +78,11 @@ docs/EXPERIMENTAL_FR.md   Journal de R&D : approches essayées, échecs et cause
 ## État & limites connues
 
 - ✅ Zéro écran, pas de dégâts de chute, pas d'entités/chunks/effets/météo/GUI/cooldowns/scoreboards
-  fantômes, remap entity-id **directionnel**, resync du gamemode — validé en live sur 1.21.x (Velocity 3.4.0, Paper 1.21.4).
+  fantômes, remap entity-id **directionnel**, resync du gamemode — validé en live sur Paper 1.21.4 sur des allers-retours répétés incluant **knockback, relais de respawn après mort et fallback cross-dimension** (Velocity patché cœur 3.6.0-SNAPSHOT).
+- ✅ Cycle fantôme complet sur **tout** switch post-join (`/server`, `/transfer`, API) : snapshot à l'armement → purge au switch (scoreboard + entités) → cleanup release à la livraison du chunk d'arrivée (97–472 ghost chunks détruits par switch en tests).
 - ✅ Plage supportée : MC **1.13 → dernière** (réseaux homogènes) ; ≥1.20.2 via absorption de la phase
-  config, 1.13–1.20.1 via switch en état PLAY (JoinGame intercepté, jamais transmis).
-- ✅ Passe de perfs : lectures brutes des coords de chunks, peek des paquets de mouvement, unloads de
+  config, 1.13–1.20.1 via switch en état PLAY (JoinGame intercepté, jamais transmis) — chemin legacy implémenté + couvert unitairement, matrice live en attente.
+- ✅ Passe de perfs : lectures brutes des coords de chunks, réécriture raw d'entity-id pour metadata/velocity/teleport/position-sync (sans wrapper packetevents, rollback-safe), unloads de
   chunks fantômes différés (dédoublonnés avec les resends de la destination), mémoire de tracking
   des chunks bornée.
 - ✅ **Cross-dimension supporté** via fallback auto vers Respawn KEEP_ALL_DATA (bref flash de chargement, safe).

@@ -20,6 +20,9 @@ la racine et [docs/EXPERIMENTAL_FR.md](../docs/EXPERIMENTAL_FR.md).
    Le monde se transforme sur place via les chunks + teleport du nouveau serveur. Le plugin proxy
    compagnon (InstantTransfer) gèle le joueur pendant le trou de chunk, nettoie les fantômes et
    échange les entity-ids ; l'agent backend couvre dégâts de chute et kicks de vol.
+   Sur **1.13–1.20.1** (pas de phase CONFIGURATION du tout), `doSeamlessLegacySwitch()` fait la
+   même chose purement en état PLAY : le JoinGame du backend est intercepté et jamais transmis,
+   et la même annonce ids synthétique arme les plugins compagnons.
 3. **Annonce ids/gamemode** — à chaque switch seamless, le patch écrit un plugin message
    synthétique (`instanttransfer:ids`, payload `clientId:backendId:gamemode`) que le plugin proxy
    intercepte (le client ne le voit jamais) pour piloter le remap d'entity-id et la resync du

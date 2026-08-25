@@ -92,18 +92,19 @@ state (flight) that neutralizes gravity. It is the least invasive mechanism poss
 | Tab list, boss bars | handled by Velocity on switch | ✅ automatic |
 | View/simulation distance, recipes, advancements | re-sent at join | ✅ automatic |
 | Item cooldowns (ender pearl, shield…) | SET_COOLDOWN tracking → zeroed on release (a real join never carries them over) | ✅ |
-| Old server's scoreboard objectives/teams | SCOREBOARD_OBJECTIVE/TEAMS tracking → REMOVE on release; a re-CREATE of a still-ghost name gets a REMOVE injected first (the vanilla client THROWS on duplicate objective CREATE → "network error" kick); the Respawn fallback also cleans them (the scoreboard is the one thing that survives a respawn client-side) | ✅ |
+| Old server's scoreboard objectives/teams | THREE belts: (1) REMOVE on release; (2) purge at switch time (ids message) — the scoreboard is connection-scoped client-side and a destination without its own scoreboard would never trigger any re-CREATE; (3) a re-CREATE of a client-known name gets a REMOVE injected first, keyed on the ACTIVE set (mirror of client truth), not on ghost bookkeeping — the vanilla client THROWS on duplicate objective CREATE → "network error" kick | ✅ |
 | Ghost weather (old server's rain) | CHANGE_GAME_STATE weather tracking → END_RAINING + zeroed rain/thunder levels on release if the new server sent no weather | ✅ |
 | Open GUI/chest during the switch | OPEN_WINDOW/OPEN_HORSE_WINDOW tracking → CloseWindow on release | ✅ |
 | Own tab-list entry (the client caches its PlayerInfo object inside the player entity; a remove/re-add cycle strands the cache → spectator noclip breaks, isSpectator/isCreative read a stale gamemode) | own-UUID filtered out of PLAYER_INFO_REMOVE + re-ADDs downgraded to in-place updates of the surviving entry | ✅ |
 | Different dimension between servers | patch compares the dimension type at each switch → automatic real-Respawn fallback (correct vanilla reload, brief screen); the plugin detects the Respawn and stands its machinery down; backend-relayed Respawns (portals, /execute in … tp, death) also update the tracked dimension | ✅ (fallback, not zero-screen: a client level cannot change sky/height in place) |
-| Backends older than 1.20.2 (no CONFIGURATION phase) | PLAY-state switch in the patch: backend JoinGame intercepted, never forwarded (see §7); Respawn decodable on every era via the StateRegistry `map(...)` table | ✅ |
+| Ghost entities from the previous server | destroyed at switch time (ids message): a `DestroyEntities` batch in client-space ids, world-independent, fired long before the arrival chunk — NOT only at release (on real networks the release leg can be starved; see §7 incident) | ✅ |
+| Backends older than 1.20.2 (no CONFIGURATION phase) | PLAY-state switch in the patch: backend JoinGame intercepted, never forwarded (see §7); Respawn decodable on every era via the StateRegistry `map(...)` table | ✅ implemented + unit-covered, live matrix pending |
 | Ghost effect swirls on eras with unverified living-entity metadata indices (< 1.20.2) | REMOVE_ENTITY_EFFECT still sent (HUD icon cleared); the swirl metadata reset is gracefully skipped instead of guessing historical indices — leftover swirls fade at the effect's natural expiry | ✅ (accepted degradation) |
 
 ## 6. Remaining work
 
-1. Broader version range: implemented on this branch — supported range is now MC **1.13 → latest**
-   (see §7); next step is live validation across that matrix, then BungeeCord.
+1. Broader version range: implemented — supported range is now MC **1.13 → latest** (see §7);
+   ≥ 1.20.2 is live-validated; the < 1.20.2 PLAY-state path awaits the live matrix, then BungeeCord.
 2. Deployment note: each switch re-sends the player's whole view distance (~400 chunk packets);
    size backend heaps accordingly (≥ 2 GB recommended) — an undersized heap shows up as GC stalls
    ("Can't keep up!") and eventually OutOfMemoryError during chunk saves.
@@ -139,12 +140,51 @@ Qualitative deltas shipped on this branch:
   re-sends is no longer unloaded then immediately re-delivered);
 - bounded loaded-chunk-tracking memory (tracking pruned on far teleports).
 
+### Live validation & the packetevents-skew incident (2026-08-25, Paper 1.21.4 ×2)
+The first real-network run exposed a protocol skew between **packetevents 2.13.0 and Paper
+1.21.4**, with three distinct symptoms sharing one root:
+1. `ENTITY_METADATA` parsing threw on an unknown metadata type id (32) — PE's V_1_21_4 registry
+   is incomplete;
+2. event buffers sometimes still carry the leading packet-id VarInt (proven empirically by the
+   chunk-header offset probe), so wrapper parses misalign by one byte — and a misaligned parse
+   that still "succeeds" re-encodes into a TRUNCATED frame (`set_entity_motion`,
+   `entity_position_sync` at 3 bytes) that hard-crashes the vanilla client decoder.
+
+**Answer: stop using wrappers for the affected types.** `RawEntityIdRewriter` swaps ONLY the
+leading entity-id VarInt directly in the event buffer, testing both slicing hypotheses (with /
+without pid prefix), saving the original bytes first, verifying the write, and rolling back on
+any anomaly — a failed rewrite degrades to pass-through, never to corruption. Applied to
+METADATA / VELOCITY / TELEPORT / POSITION_SYNC; the remaining wrappers (effects, attributes,
+equipment…) have shown no skew and stay wrapper-based. Knockback and self-metadata remapping are
+fully restored this way, without waiting on a packetevents upgrade.
+
+**Second incident: unmanaged switches.** The ghost lifecycle (snapshot → purge → release) was
+armed only for `/transfer`/API requests; a plain `/server` switch got the zero-screen patch and
+the id remap but NO lifecycle — previous-server entities survived on the destination forever,
+and every release-side cleanup leg appeared dead. Rule now: EVERY post-join switch arms
+snapshot + guard; the instant-transfer flag only gates the API events. This also resurrected the
+release log line (`seamless arrival … removed N ghost chunks`) that had never been observed.
+
+**Scoreboard hardening** came out of the same run: connection-scoped client state means a
+destination WITHOUT its own scoreboard never triggers any re-CREATE, so release-time removal
+alone can leave a stale sidebar visible forever. Three belts now: ids-time purge (idempotent),
+active-keyed duplicate-CREATE guard, release cleanup.
+
 ### Measured results
-(pending — filled by the Task 12 matrix run)
+Live single-player rig, Paper 1.21.4 ×2 backends behind the patched Velocity, repeated S1↔S2
+round-trips (2026-08-25):
+- freeze window (arrival teleport → unfreeze): **≈160–260 ms** per switch;
+- arrival detection: "arrival chunk delivered" on 100 % of observed switches;
+- ghost cleanup at release: **97–472 ghost chunks destroyed per switch** (view-distance
+  dependent), 4 ghost entities purged at switch time, 1 scoreboard objective purged;
+- stability: zero crashes / zero kicks across the final build's repeated round-trips, including
+  knockback hits, a death respawn relay and a cross-dimension fallback.
+Matrix runs for < 1.20.2 eras remain pending (see RUNBOOK).
 
 ### Per-release maintenance contract
 Supporting a newly released Minecraft version costs one line: add the matching `map(...)` entry
 to the Respawn decode table in `velocity-patch/seamless.patch` (`StateRegistry`), run
-`scripts/check-protocol-tables.sh` (fails when the table lags packetevents' newest known version)
+`scripts/check-protocol-tables.sh` (guards the table against lagging behind packetevents — via a
+derived constant with an `EXPECTED_NEWEST` fallback documented in the script)
 + `scripts/validate-patch-hunks.sh` (validates the patch hunk counts), then rebuild the jar per
 [velocity-patch/README.md](../velocity-patch/README.md).
