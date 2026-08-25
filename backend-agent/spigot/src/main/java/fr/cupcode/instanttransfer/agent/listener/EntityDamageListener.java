@@ -19,7 +19,8 @@ public class EntityDamageListener implements Listener {
 
     @EventHandler
     public void onDamage(EntityDamageEvent e) {
-        if (!(e.getEntity() instanceof Player player)) return;
+        if (!(e.getEntity() instanceof Player)) return;
+        Player player = (Player) e.getEntity();
         UUID uuid = player.getUniqueId();
 
         if (AgentAPI.consumeFallGrace(uuid)) {

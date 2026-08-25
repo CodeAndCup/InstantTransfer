@@ -33,7 +33,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
     @Override
     public void onEnable() {
-        ConfigValue.setDebug(getConfig().getBoolean("debug", true));
+        ConfigValue.setDebug(getConfig().getBoolean("debug", false));
         getLogger().info("InstantTransferAgent enabled (coord channel '" + COORD_CHANNEL + "', arrival fall/flight guard, debug=" + ConfigValue.isDebug() + ").");
 
         getServer().getMessenger().registerOutgoingPluginChannel(this, COORD_CHANNEL);
