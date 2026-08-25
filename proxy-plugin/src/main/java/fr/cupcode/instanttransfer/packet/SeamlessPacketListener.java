@@ -277,12 +277,12 @@ public final class SeamlessPacketListener implements PacketListener {
                 if (w.getMode() == WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE) {
                     if (state.oldServerTalking()) {
                         state.ghostObjectives().add(w.getName());
-                    } else if (state.ghostObjectives().remove(w.getName())) {
-                        // The new server re-creates an objective the client still has from the old
-                        // one. The vanilla client THROWS on a duplicate objective CREATE ("An
-                        // objective with the name ... already exists!" → disconnect), so remove
-                        // the stale one first — this injected packet reaches the client BEFORE
-                        // the in-flight CREATE.
+                    } else if (state.activeObjectives().remove(w.getName())) {
+                        // The new server re-creates an objective the CLIENT still has — keyed on
+                        // active (the mirror of client-known names from ANY prior session), NOT on
+                        // ghost: if the release-time REMOVE ever failed to reach the client, this
+                        // second-chance guard must still fire, because the vanilla client THROWS
+                        // on a duplicate objective CREATE ("already exists!" → disconnect).
                         sendSuppressed(user, state, new WrapperPlayServerScoreboardObjective(
                                 w.getName(), WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE,
                                 null, null));
@@ -298,9 +298,10 @@ public final class SeamlessPacketListener implements PacketListener {
                 if (w.getTeamMode() == WrapperPlayServerTeams.TeamMode.CREATE) {
                     if (state.oldServerTalking()) {
                         state.ghostTeams().add(w.getTeamName());
-                    } else if (state.ghostTeams().remove(w.getTeamName())) {
-                        // Duplicate team CREATE only logs a client warning (the stale team wins);
-                        // remove the old one first so the new server's definition applies.
+                    } else if (state.activeTeams().remove(w.getTeamName())) {
+                        // Same active-keyed dedupe as objectives: duplicate team CREATE only
+                        // logs a client warning (stale team wins), but removing first lets the
+                        // new server's definition apply — even when the release REMOVE was lost.
                         sendSuppressed(user, state, new WrapperPlayServerTeams(
                                 w.getTeamName(), WrapperPlayServerTeams.TeamMode.REMOVE, Optional.empty()));
                     }
