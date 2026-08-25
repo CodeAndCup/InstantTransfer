@@ -33,13 +33,35 @@
             <groupId>com.github.retrooper</groupId>
             <artifactId>packetevents-spigot</artifactId>
             <version>2.13.0</version>
-            <scope>provided</scope>
+            <scope>compile</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.github.retrooper</groupId>
+                    <artifactId>packetevents-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.github.retrooper</groupId>
+                    <artifactId>packetevents-netty-common</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.github.retrooper</groupId>
+            <artifactId>packetevents-api</artifactId>
+            <version>2.13.0</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.retrooper</groupId>
+            <artifactId>packetevents-netty-common</artifactId>
+            <version>2.13.0</version>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
             <version>33.0.0-jre</version>
-            <scope>provided</scope>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 
@@ -61,12 +83,14 @@
                 <version>3.6.0</version>
                 <executions>
                     <execution>
+                        <id>make-shade</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <includeScope>compile|provided</includeScope>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>fr.cupcode.instanttransfer.agent.AgentPlugin</mainClass>
@@ -80,10 +104,22 @@
                                     </excludes>
                                 </filter>
                             </filters>
+                            <artifactSet>
+                                <includes>
+                                    <include>com.github.retrooper:packetevents-spigot</include>
+                                    <include>com.github.retrooper:packetevents-api</include>
+                                    <include>com.github.retrooper:packetevents-netty-common</include>
+                                    <include>com.google.guava:guava</include>
+                                </includes>
+                            </artifactSet>
                             <relocations>
                                 <relocation>
                                     <pattern>com.google.common</pattern>
                                     <shadedPattern>fr.cupcode.instanttransfer.agent.shaded.com.google.common</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>io.github.retrooper.packetevents</pattern>
+                                    <shadedPattern>fr.cupcode.instanttransfer.agent.shaded.packetevents</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.github.retrooper.packetevents</pattern>
