@@ -31,13 +31,16 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerHurtAnimation;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPluginMessage;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateAttributes;
 import io.netty.buffer.ByteBuf;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.EnumSet;
 
 /**
@@ -301,6 +304,7 @@ public final class EntityIdRemapper implements PacketListener {
         // The patch writes this message BEFORE relaying anything from the new backend: from here
         // on, incoming traffic is the new server's (late old-server packets can no longer occur).
         state.markNewServerTalking();
+        purgeStaleScoreboard(user, state);
         String payload = new String(w.getData(), StandardCharsets.UTF_8);
         String[] parts = payload.split(":");
         if (parts.length < 2) {
@@ -319,6 +323,43 @@ public final class EntityIdRemapper implements PacketListener {
                 user.getName(), clientId, backendId,
                 parts.length >= 3 ? parts[2] : "?",
                 clientId == backendId ? "identical, remap idle" : "swap active");
+    }
+
+    /**
+     * The scoreboard is connection-scoped client-side: whatever the previous server displayed
+     * survives a zero-screen switch until someone removes it. A destination WITHOUT its own
+     * scoreboard would otherwise show the previous server's sidebar indefinitely (nothing
+     * re-creates the name, so the duplicate-CREATE guard never fires). Removed the instant the
+     * ids message proves the old server is done talking — long before the arrival guard
+     * completes, because sidebar cleanup has no dependency on world chunks. Idempotent: an
+     * extra REMOVE for a name the client already dropped is a vanilla no-op.
+     */
+    private void purgeStaleScoreboard(User user, SwitchState state) {
+        if (state.activeObjectives().isEmpty() && state.activeTeams().isEmpty()) {
+            return;
+        }
+        state.suppressListener(true);
+        try {
+            for (String name : state.activeObjectives()) {
+                user.sendPacket(new WrapperPlayServerScoreboardObjective(
+                        name, WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE,
+                        null, null));
+            }
+            for (String team : state.activeTeams()) {
+                user.sendPacket(new WrapperPlayServerTeams(
+                        team, WrapperPlayServerTeams.TeamMode.REMOVE, Optional.empty()));
+            }
+            if (config.debug()) {
+                logger.info("[InstantTransfer] purged {} objective(s) / {} team(s) at switch",
+                        state.activeObjectives().size(), state.activeTeams().size());
+            }
+        } catch (Exception e) {
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] scoreboard purge failed: {}", e.toString());
+            }
+        } finally {
+            state.suppressListener(false);
+        }
     }
 
     private interface IdSetter {
