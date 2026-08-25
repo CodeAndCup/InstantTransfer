@@ -65,7 +65,7 @@ public final class EntityIdRemapper implements PacketListener {
             PacketType.Play.Server.ENTITY_EFFECT, PacketType.Play.Server.REMOVE_ENTITY_EFFECT,
             PacketType.Play.Server.UPDATE_ATTRIBUTES, PacketType.Play.Server.HURT_ANIMATION,
             PacketType.Play.Server.DAMAGE_EVENT, PacketType.Play.Server.ENTITY_ANIMATION,
-            PacketType.Play.Server.ENTITY_METADATA, PacketType.Play.Server.ENTITY_EQUIPMENT,
+            PacketType.Play.Server.ENTITY_EQUIPMENT,
             PacketType.Play.Server.SET_PASSENGERS, PacketType.Play.Server.ATTACH_ENTITY,
             PacketType.Play.Server.ENTITY_TELEPORT, PacketType.Play.Server.ENTITY_POSITION_SYNC,
             PacketType.Play.Server.ENTITY_HEAD_LOOK, PacketType.Play.Server.ENTITY_ROTATION,
@@ -163,18 +163,12 @@ public final class EntityIdRemapper implements PacketListener {
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_METADATA) {
-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
-                try {
-                    WrapperPlayServerEntityMetadata w = new WrapperPlayServerEntityMetadata(event);
-                    remapSend(event, w.getEntityId(), w::setEntityId, state);
-                } catch (Exception parseFailure) {
-                    // Newer MC versions ship metadata types this packetevents build cannot parse
-                    // (e.g. type 32 on 1.21.4). Hand-rewriting the leading varint would risk
-                    // corrupting the frame mid-buffer (a far worse failure mode), so the packet
-                    // passes through untouched: a self-targeted update may carry the backend id
-                    // and be ignored client-side until the next resync — cosmetic only.
-                }
-
+                // Deliberately NOT handled: packetevents 2.13.0's V_1_21_4 metadata registry is
+                // incomplete (chokes on type id 32) — parsing throws mid-body, and ANY re-encode
+                // of these frames risks emitting malformed ones (client DecoderException on a
+                // 3-byte set_entity_data). Passing the packet through byte-exact is always safe;
+                // cost: self-targeted metadata (pose/flags/skin layers) keeps the backend id and
+                // is ignored by the client until the next health/attribute resync.
             } else if (type == PacketType.Play.Server.ENTITY_EQUIPMENT) {
                 if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
                 WrapperPlayServerEntityEquipment w = new WrapperPlayServerEntityEquipment(event);
