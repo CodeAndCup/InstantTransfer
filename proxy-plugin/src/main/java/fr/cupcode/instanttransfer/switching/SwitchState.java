@@ -432,6 +432,12 @@ public final class SwitchState {
         return movementPeekChecks.getAndIncrement();
     }
 
+    /** Re-arms the first-N raw-peek sanity probes for a new switch (they stop after 10 packets). */
+    public void resetPeekProbes() {
+        chunkPeekChecks.set(0);
+        movementPeekChecks.set(0);
+    }
+
     public Set<Integer> trackedEntities() {
         return trackedEntities;
     }
@@ -527,9 +533,8 @@ public final class SwitchState {
         this.ghostWeather = value;
     }
 
-    /** Capture the current world as "ghosts" to be removed once the seamless switch completes. */
-    public void snapshotGhosts() {
-        ghostEntities.clear();
+        /** Capture the current world as "ghosts" to be removed once the seamless switch completes. */
+    public void snapshotGhosts() {        ghostEntities.clear();
         ghostEntities.addAll(trackedEntities);
         ghostChunks.clear();
         ghostChunks.addAll(loadedChunks);

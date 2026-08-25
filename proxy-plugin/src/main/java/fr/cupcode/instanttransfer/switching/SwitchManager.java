@@ -72,13 +72,12 @@ public final class SwitchManager {
             return; // initial join, not a switch
         }
 
-        // Check if this is an instant transfer request (via /transfer command or API)
+        // Check whether this switch came from /transfer or the API (drives event firing only).
         UUID uuid = player.getUniqueId();
-        if (!plugin.consumeInstantTransferRequest(uuid)) {
-            if (config.debug()) {
-                logger.debug("[InstantTransfer] Normal server switch for {} (no instant transfer flag)", player.getUsername());
-            }
-            return; // Normal /server switch → let Velocity handle it normally
+        boolean instantTransferRequest = plugin.consumeInstantTransferRequest(uuid);
+        if (!instantTransferRequest && config.debug()) {
+            logger.debug("[InstantTransfer] Normal server switch for {} (no instant transfer flag)"
+                    + " — seamless machinery arms anyway", player.getUsername());
         }
 
         // Verify the target server matches what was requested (extra safety)
@@ -95,17 +94,25 @@ public final class SwitchManager {
         }
 
         SwitchState state = getOrCreate(uuid);
-        // Snapshot the current (old server's) entities and chunks; they become ghosts after the switch.
+        // Snapshot the current (old server's) entities and chunks; they become ghosts after the
+        // switch. Runs for EVERY post-join switch — a plain /server switch is seamless too (the
+        // patch handles it unconditionally), and without this snapshot the ghost/purge lifecycle
+        // never engages (observed live: S1 entities surviving on S2).
         state.snapshotGhosts();
         // Arm the arrival guard: freeze on the arrival teleport, release on the landing chunk.
         state.armGuard(System.currentTimeMillis());
+        // Re-enable the raw-peek sanity probes for this switch (they stop after 10 packets to
+        // stay free in steady state).
+        state.resetPeekProbes();
 
-        // Fire transfer start event
-        plugin.fireTransferStart(
-                player,
-                previousServer,
-                requestedTarget
-        );
+        // Fire transfer start event only for explicit instant-transfer requests
+        if (instantTransferRequest) {
+            plugin.fireTransferStart(
+                    player,
+                    previousServer,
+                    requestedTarget
+            );
+        }
 
         if (config.debug()) {
             String from = currentConnection.getServerInfo().getName();
