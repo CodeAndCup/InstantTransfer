@@ -64,7 +64,7 @@ public final class EntityIdRemapper implements PacketListener {
 
     private static final EnumSet<PacketType.Play.Server> SEND_TRACKED = EnumSet.of(
             PacketType.Play.Server.PLUGIN_MESSAGE,
-            PacketType.Play.Server.ENTITY_STATUS, PacketType.Play.Server.ENTITY_VELOCITY,
+            PacketType.Play.Server.ENTITY_STATUS,
             PacketType.Play.Server.ENTITY_EFFECT, PacketType.Play.Server.REMOVE_ENTITY_EFFECT,
             PacketType.Play.Server.UPDATE_ATTRIBUTES, PacketType.Play.Server.HURT_ANIMATION,
             PacketType.Play.Server.DAMAGE_EVENT, PacketType.Play.Server.ENTITY_ANIMATION,
@@ -123,10 +123,13 @@ public final class EntityIdRemapper implements PacketListener {
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
 
             } else if (type == PacketType.Play.Server.ENTITY_VELOCITY) {
-                if (irrelevantByPeek(event, state, movementOffset(event, state))) return;
-                WrapperPlayServerEntityVelocity w = new WrapperPlayServerEntityVelocity(event);
-                remapSend(event, w.getEntityId(), w::setEntityId, state);
-
+                // Deliberately NOT handled (same class as ENTITY_METADATA): on this Paper 1.21.4
+                // network the PE 2.13.0 motion wrapper misparses frames (IOOBE one field past the
+                // end on some packets — and a silently MISALIGNED parse that still "succeeds" is
+                // worse: its re-encode emitted a truncated set_entity_motion that hard-crashed
+                // the client decoder). Byte-exact pass-through is always safe; cost: knockback
+                // aimed at the player keeps the backend id and is ignored by the client until
+                // packetevents is upgraded to a build whose 1.21.4 registry matches vanilla.
             } else if (type == PacketType.Play.Server.ENTITY_EFFECT) {
                 WrapperPlayServerEntityEffect w = new WrapperPlayServerEntityEffect(event);
                 remapSend(event, w.getEntityId(), w::setEntityId, state);
