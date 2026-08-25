@@ -314,7 +314,7 @@ index 8880233..122cb7e 100644
        } else {
          this.doFastClientServerSwitch(joinGame);
        }
-@@ -695,6 +787,74 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -695,6 +787,97 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
      destination.completeJoin();
    }
  
@@ -372,16 +372,39 @@ index 8880233..122cb7e 100644
 +
 +  /**
 +   * Seamless switch for pre-config-phase protocols (1.13–1.20.1): the entire switch happens in
-+   * PLAY. We intercept the backend's JoinGame and forward NEITHER it nor any Respawn — the
-+   * client keeps its level and entity id; the companion proxy plugin receives the same synthetic
-+   * ids announcement as the modern path and drives freeze/ghost-cleanup/remap/gamemode-resync.
++   * PLAY. We intercept the backend's JoinGame and BY DEFAULT forward NEITHER it nor any Respawn
++   * — the client keeps its level and entity id; the companion proxy plugin receives the same
++   * synthetic ids announcement as the modern path and drives freeze/ghost-cleanup/remap/
++   * gamemode-resync. Falls back to a real Respawn when the destination runs a DIFFERENT
++   * dimension type or when -Dvelocity.seamlessRespawn=true opts into the robust flavor, exactly
++   * like the modern path.
 +   */
 +  private void doSeamlessLegacySwitch(JoinGamePacket joinGame) {
 +    final int clientId = seamlessClientEntityId >= 0 ? seamlessClientEntityId : joinGame.getEntityId();
 +    final String idsPayload = clientId + ":" + joinGame.getEntityId() + ":" + joinGame.getGamemode();
 +    player.getConnection().delayedWrite(new PluginMessagePacket("instanttransfer:ids",
 +        Unpooled.wrappedBuffer(idsPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8))));
-+    seamlessClientDimension = seamlessDimensionKey(joinGame);
++
++    // Same cross-dimension guard as the modern path: a zero-screen morph only works into the
++    // SAME dimension type (the client level's sky/fog/height are immutable); a different
++    // destination dimension falls back to the robust Respawn below.
++    final String newDimension = seamlessDimensionKey(joinGame);
++    final boolean crossDimension =
++        seamlessClientDimension != null && !seamlessClientDimension.equals(newDimension);
++    seamlessClientDimension = newDimension;
++
++    if (SEAMLESS_RESPAWN || crossDimension) {
++      final RespawnPacket respawn = new RespawnPacket(
++          joinGame.getDimension(), joinGame.getPartialHashedSeed(), joinGame.getDifficulty(),
++          joinGame.getGamemode(), joinGame.getLevelType(), (byte) 0x03, joinGame.getDimensionInfo(),
++          joinGame.getPreviousGamemode(), joinGame.getCurrentDimensionData(),
++          joinGame.getLastDeathPosition(), joinGame.getPortalCooldown(), joinGame.getSeaLevel());
++      logger.info("[seamless] doSeamlessLegacySwitch: respawn(KEEP_ALL_DATA), backend "
++              + "entityId={}{}", joinGame.getEntityId(),
++          crossDimension ? " — CROSS-DIMENSION fallback (dimension " + newDimension + ")" : "");
++      player.getConnection().delayedWrite(respawn);
++      return;
++    }
 +    logger.info("[seamless] doSeamlessLegacySwitch: zero-screen (PLAY-state), backend entityId={} dimension={}",
 +        joinGame.getEntityId(), seamlessClientDimension);
 +  }
@@ -389,7 +412,7 @@ index 8880233..122cb7e 100644
    private void doFastClientServerSwitch(JoinGamePacket joinGame) {
      // In order to handle switching to another server, you will need to send two packets:
      //
-@@ -705,6 +865,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -705,6 +888,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
      // to perform entity ID rewrites, eliminating potential issues from rewriting packets and
      // improving compatibility with mods.
      final RespawnPacket respawn = RespawnPacket.fromJoinGame(joinGame);
@@ -398,7 +421,7 @@ index 8880233..122cb7e 100644
  
      if (player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_16)) {
        // Before Minecraft 1.16, we could not switch to the same dimension without sending an
-@@ -722,6 +884,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
+@@ -722,6 +907,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
      // same effect but tend to work better with buggier clients (Forge 1.8 in particular).
  
      // Send the JoinGame packet itself, unmodified.

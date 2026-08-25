@@ -40,4 +40,13 @@ class PendingChunkUnloadsTest {
         p.defer(30L); p.defer(10L); p.defer(20L);
         assertArrayEquals(new long[]{10, 20, 30}, p.drainSorted());
     }
+
+    @Test
+    void clearEmptiesPopulatedSet() {
+        p.defer(100L); p.defer(200L); p.defer(300L);
+        p.cancelIfPresent(200L);
+        p.clear();
+        assertTrue(p.isEmpty());
+        assertEquals(0, p.drainSorted().length);
+    }
 }

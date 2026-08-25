@@ -443,6 +443,9 @@ public final class SeamlessPacketListener implements PacketListener {
         state.trackedEntities().clear();
         state.ghostEntities().clear();
         state.ghostChunks().clear();
+        // The client rebuilt its level: keys deferred at arm time no longer correspond to
+        // anything client-side and must not fire at a future switch's guard end.
+        state.pendingChunkUnloads().clear();
         state.clearWeather();
         state.ghostWeather(false);
         if (state.finishGuard()) {

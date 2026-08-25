@@ -578,6 +578,7 @@ public final class SwitchState {
         public synchronized void defer(long key) { pending.add(key); }
         public synchronized void cancelIfPresent(long key) { pending.remove(key); }
         public synchronized boolean isEmpty() { return pending.isEmpty(); }
+        public synchronized void clear() { pending.clear(); }
         public synchronized long[] drainSorted() {
             long[] out = new long[pending.size()];
             int i = 0;
