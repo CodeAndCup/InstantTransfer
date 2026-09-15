@@ -180,8 +180,10 @@ public final class SeamlessPacketListener implements PacketListener {
                         try {
                             WrapperPlayServerChunkData w = new WrapperPlayServerChunkData(event);
                             solved = solveOffsetAgainstTruth(body, w.getColumn().getX(), w.getColumn().getZ());
-                        } catch (Exception ignored) {
-                            // wrapper construction itself failed: leave -1, per-packet fallback below
+                        } catch (Exception e) {
+                            if (config.debug()) {
+                                logger.warn("[InstantTransfer] chunk offset solve failed: {}; falling back to wrapper decode", e.toString());
+                            }
                         }
                         state.chunkHeaderOffsetCache(solved); // -1 => always-wrapper for this user
                         off = solved;
@@ -393,8 +395,10 @@ public final class SeamlessPacketListener implements PacketListener {
 
             // Safety net: if the arrival chunk doesn't arrive in time, send a position correction
             // to the known arrival position and keep flight enabled (don't unfreeze brutally).
-            if (state.guardActive() && state.teleportSeen()
-                    && System.currentTimeMillis() - state.guardArmedAt() > config.guardTimeoutMs()) {
+            // Use a snapshot to read guard state atomically and avoid TOCTOU races.
+            SwitchState.SwitchStateSnapshot s = state.snapshot();
+            if (s.guardActive && s.teleportSeen
+                    && System.currentTimeMillis() - s.guardArmedAt > config.guardTimeoutMs()) {
                 handleTimeout(user, state);
             }
         } catch (Exception e) {
@@ -535,11 +539,15 @@ public final class SeamlessPacketListener implements PacketListener {
     }
 
     /** Stable comparison key for a dimension type, whether name- or registry-id-encoded. */
-    private static String dimensionKey(DimensionTypeRef ref, ProtocolAdapter pa) {
+    private String dimensionKey(DimensionTypeRef ref, ProtocolAdapter pa) {
         if (ref == null) return null;
         String name = null;
         try { ResourceLocation rl = ref.getName(); name = rl == null ? null : rl.toString(); }
-        catch (Exception ignored) { }
+        catch (Exception e) {
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] dimension key resolution failed: {}", e.toString());
+            }
+        }
         Integer id = null;
         try { id = ref.getId(); } catch (Exception e) { }
         return ProtocolAdapter.dimensionKey(name, id, pa.era());

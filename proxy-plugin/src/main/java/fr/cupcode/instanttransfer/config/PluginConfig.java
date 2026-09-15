@@ -33,6 +33,23 @@ public final class PluginConfig {
      *  a position correction is sent (if absolute coords known) instead of brutally unfreezing. */
     private int guardTimeoutMs = 5000;
 
+    /**
+     * Shared secret HMAC used to sign {@code instanttransfer:ids} plugin messages.
+     * When set, the EntityIdRemapper will verify the HMAC-SHA256 of the payload portion
+     * (clientId:backendId[:gamemode]) against this hex-encoded secret.
+     * If the HMAC does not match, the IDs message is ignored and logged as suspicious.
+     * Set a secret on both the proxy and the patched Velocity to authenticate IDs messages.
+     */
+    private String idsHmacSecret = "";
+
+    /**
+     * Shared secret HMAC used to sign {@code instanttransfer:coord} plugin messages.
+     * When set, both CoordManager and AgentPlugin will verify the HMAC-SHA256 of the payload
+     * against this hex-encoded secret. Messages without a valid HMAC are ignored.
+     * Set the same secret on the proxy and the backend agent to authenticate coord messages.
+     */
+    private String coordHmacSecret = "";
+
     private PluginConfig() {
     }
 
@@ -52,6 +69,14 @@ public final class PluginConfig {
         return guardTimeoutMs;
     }
 
+    public String idsHmacSecret() {
+        return idsHmacSecret;
+    }
+
+    public String coordHmacSecret() {
+        return coordHmacSecret;
+    }
+
     public static PluginConfig load(Path dataDirectory, Logger logger) {
         PluginConfig config = new PluginConfig();
         try {
@@ -66,6 +91,13 @@ public final class PluginConfig {
                 config.requireSameDimension = parseBool(props, "require-same-dimension", config.requireSameDimension);
                 config.debug = parseBool(props, "debug", config.debug);
                 config.guardTimeoutMs = parseInt(props, "guard-timeout-ms", config.guardTimeoutMs);
+                if (config.guardTimeoutMs < 1000 || config.guardTimeoutMs > 60000) {
+                    logger.warn("[InstantTransfer] guard-timeout-ms value {} is outside recommended range [1000, 60000]; clamping to {}",
+                            config.guardTimeoutMs, Math.max(1000, Math.min(60000, config.guardTimeoutMs)));
+                    config.guardTimeoutMs = Math.max(1000, Math.min(60000, config.guardTimeoutMs));
+                }
+                config.idsHmacSecret = parseString(props, "ids-hmac-secret", config.idsHmacSecret);
+                config.coordHmacSecret = parseString(props, "coord-hmac-secret", config.coordHmacSecret);
             } else {
                 props.setProperty("seamless-enabled", Boolean.toString(config.seamlessEnabled));
                 props.setProperty("require-same-dimension", Boolean.toString(config.requireSameDimension));
@@ -97,5 +129,10 @@ public final class PluginConfig {
         } catch (NumberFormatException e) {
             return def;
         }
+    }
+
+    private static String parseString(Properties props, String key, String def) {
+        String raw = props.getProperty(key);
+        return raw == null ? def : raw.trim();
     }
 }

@@ -76,7 +76,7 @@ public final class InstantTransfer implements InstantTransferAPI {
 
         // Proxy<->backend coordination channel (arrival unfreeze + diagnostics).
         proxy.getChannelRegistrar().register(CoordManager.COORD);
-        coordManager = new CoordManager(proxy, logger);
+        coordManager = new CoordManager(proxy, logger, config.coordHmacSecret());
         proxy.getEventManager().register(this, coordManager);
 
         switchManager = new SwitchManager(config, logger, this);

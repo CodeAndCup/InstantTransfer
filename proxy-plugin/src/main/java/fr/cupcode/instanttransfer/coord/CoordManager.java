@@ -10,16 +10,12 @@ import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
-/**
- * Proxy side of the proxy<->backend coordination channel.
- *
- * <p>Brick 1 (foundation): registers the {@code instanttransfer:coord} channel, sends a ping to the
- * destination backend right after a switch, and logs anything the backends send back. This proves the
- * bidirectional comms path that later bricks will use to orchestrate a coordinated "skip config"
- * switch (announce transfer, exchange arrival state, agree on lockstep).</p>
- */
 public final class CoordManager {
 
     public static final MinecraftChannelIdentifier COORD =
@@ -27,10 +23,52 @@ public final class CoordManager {
 
     private final ProxyServer proxy;
     private final Logger logger;
+    private final String coordHmacSecret;
 
-    public CoordManager(ProxyServer proxy, Logger logger) {
+    public CoordManager(ProxyServer proxy, Logger logger, String coordHmacSecret) {
         this.proxy = proxy;
         this.logger = logger;
+        this.coordHmacSecret = coordHmacSecret;
+    }
+
+    private String signHmac(String payload, String secret) {
+        if (secret == null || secret.isEmpty()) {
+            return null;
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec keySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(keySpec);
+            byte[] hash = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+            return bytesToHex(hash);
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            logger.warn("[COORD] HMAC signing failed: {}", e.toString());
+            return null;
+        }
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    private boolean verifyHmac(String payload, String receivedHmac, String secret) {
+        if (secret == null || secret.isEmpty()) {
+            return true; // no secret configured → allow for backward compatibility
+        }
+        int lastColon = payload.lastIndexOf(':');
+        if (lastColon < 1) {
+            return false;
+        }
+        String signingPayload = payload.substring(0, lastColon);
+        String computedHmac = signHmac(signingPayload, secret);
+        if (computedHmac == null) {
+            return false;
+        }
+        return computedHmac.equals(receivedHmac);
     }
 
     @Subscribe
@@ -51,7 +89,7 @@ public final class CoordManager {
      */
     public void sendUnfreeze(UUID uuid) {
         proxy.getPlayer(uuid).flatMap(Player::getCurrentServer).ifPresent(server -> {
-            String payload = "unfreeze:" + uuid;
+            String payload = "unfreeze:" + uuid + ":" + signHmac("unfreeze:" + uuid, coordHmacSecret);
             server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
             logger.info("[COORD] sent unfreeze to {} for {}",
                     server.getServerInfo().getName(), uuid);
@@ -67,7 +105,7 @@ public final class CoordManager {
      */
     public void sendArrival(UUID uuid, String fromServer) {
         proxy.getPlayer(uuid).flatMap(Player::getCurrentServer).ifPresent(server -> {
-            String payload = "arrival:" + uuid + ":" + fromServer;
+            String payload = "arrival:" + uuid + ":" + fromServer + ":" + signHmac("arrival:" + uuid + ":" + fromServer, coordHmacSecret);
             server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
             logger.info("[COORD] sent arrival to {} for {} (from {})",
                     server.getServerInfo().getName(), uuid, fromServer);
@@ -83,7 +121,16 @@ public final class CoordManager {
         event.setResult(PluginMessageEvent.ForwardResult.handled());
         if (event.getSource() instanceof ServerConnection server) {
             String msg = new String(event.getData(), StandardCharsets.UTF_8);
-            logger.info("[COORD] recv from {}: {}", server.getServerInfo().getName(), msg);
+            // Verify HMAC if a signature is appended (last segment after final colon)
+            if (!verifyHmac(msg, null, coordHmacSecret)) {
+                logger.warn("[COORD] invalid HMAC on coord message from {}: {}", server.getServerInfo().getName(), msg);
+                return;
+            }
+            // Extract inner message without HMAC suffix for legacy compatibility
+            // The HMAC signature is always the last colon-delimited segment
+            int lastColon = msg.lastIndexOf(':');
+            String innerMsg = (lastColon >= 0) ? msg.substring(0, lastColon) : msg;
+            logger.info("[COORD] recv from {}: {}", server.getServerInfo().getName(), innerMsg);
         }
     }
 }

@@ -207,9 +207,95 @@ public final class SwitchState {
         guardActive = true;
     }
 
+    /** Atomically snapshot the relevant SwitchState fields; caller must not rely on separate
+     *  volatile reads (TOCTOU guard). */
+    public SwitchStateSnapshot snapshot() {
+        return new SwitchStateSnapshot(
+                guardActive, newServerTalking, guardArmedAt,
+                teleportSeen, targetChunkKnown,
+                arrivalPositionKnown, arrivalPositionAbsolute,
+                frozeFlight, clientEntityId, backendEntityId,
+                pendingGamemode, ownTabEntryAdded,
+                raining, rainLevel, thunderLevel, ghostWeather,
+                suppressListener, abilitiesKnown,
+                abGodMode, abFlying, abFlightAllowed, abCreative,
+                abFlySpeed, abFovModifier,
+                clientDimension);
+    }
+
+    /** Immutable snapshot of the most critical SwitchState fields, read atomically to prevent
+     *  TOCTOU races between compound volatile checks (e.g. guardActive + newServerTalking +
+     *  guardArmedAt timeout). */
+    public static final class SwitchStateSnapshot {
+        public final boolean guardActive;
+        public final boolean newServerTalking;
+        public final long guardArmedAt;
+        public final boolean teleportSeen;
+        public final boolean targetChunkKnown;
+        public final boolean arrivalPositionKnown;
+        public final boolean arrivalPositionAbsolute;
+        public final boolean frozeFlight;
+        public final int clientEntityId;
+        public final int backendEntityId;
+        public final int pendingGamemode;
+        public final boolean ownTabEntryAdded;
+        public final boolean raining;
+        public final float rainLevel;
+        public final float thunderLevel;
+        public final boolean ghostWeather;
+        public final boolean suppressListener;
+        public final boolean abilitiesKnown;
+        public final boolean abGodMode;
+        public final boolean abFlying;
+        public final boolean abFlightAllowed;
+        public final boolean abCreative;
+        public final float abFlySpeed;
+        public final float abFovModifier;
+        public final String clientDimension;
+
+        public SwitchStateSnapshot(boolean guardActive, boolean newServerTalking,
+                long guardArmedAt, boolean teleportSeen, boolean targetChunkKnown,
+                boolean arrivalPositionKnown, boolean arrivalPositionAbsolute,
+                boolean frozeFlight, int clientEntityId, int backendEntityId,
+                int pendingGamemode, boolean ownTabEntryAdded,
+                boolean raining, float rainLevel, float thunderLevel,
+                boolean ghostWeather, boolean suppressListener,
+                boolean abilitiesKnown, boolean abGodMode, boolean abFlying,
+                boolean abFlightAllowed, boolean abCreative,
+                float abFlySpeed, float abFovModifier, String clientDimension) {
+            this.guardActive = guardActive;
+            this.newServerTalking = newServerTalking;
+            this.guardArmedAt = guardArmedAt;
+            this.teleportSeen = teleportSeen;
+            this.targetChunkKnown = targetChunkKnown;
+            this.arrivalPositionKnown = arrivalPositionKnown;
+            this.arrivalPositionAbsolute = arrivalPositionAbsolute;
+            this.frozeFlight = frozeFlight;
+            this.clientEntityId = clientEntityId;
+            this.backendEntityId = backendEntityId;
+            this.pendingGamemode = pendingGamemode;
+            this.ownTabEntryAdded = ownTabEntryAdded;
+            this.raining = raining;
+            this.rainLevel = rainLevel;
+            this.thunderLevel = thunderLevel;
+            this.ghostWeather = ghostWeather;
+            this.suppressListener = suppressListener;
+            this.abilitiesKnown = abilitiesKnown;
+            this.abGodMode = abGodMode;
+            this.abFlying = abFlying;
+            this.abFlightAllowed = abFlightAllowed;
+            this.abCreative = abCreative;
+            this.abFlySpeed = abFlySpeed;
+            this.abFovModifier = abFovModifier;
+            this.clientDimension = clientDimension;
+        }
+    }
+
     /** True while switch traffic can still be from the OLD server (before the ids message). */
     public boolean oldServerTalking() {
-        return guardActive && !newServerTalking;
+        // Atomic read via snapshot to prevent TOCTOU
+        SwitchStateSnapshot s = snapshot();
+        return s.guardActive && !s.newServerTalking;
     }
 
     public void markNewServerTalking() {

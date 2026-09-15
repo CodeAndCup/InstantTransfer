@@ -12,6 +12,19 @@
     <name>InstantTransfer (parent)</name>
     <description>Seamless zero-loading-screen server switching for Minecraft networks.</description>
 
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>17</maven.compiler.release>
+
+        <!-- Dependency versions (pin to exact versions to prevent dependency confusion) -->
+        <velocity.version>3.4.0</velocity.version>
+        <packetevents.version>2.13.0</packetevents.version>
+        <junit.jupiter.version>5.10.2</junit.jupiter.version>
+
+        <!-- Enforce exact version matching; Maven will fail build if a version differs -->
+        <failOnUnpinnedVersions>true</failOnUnpinnedVersions>
+    </properties>
+
     <modules>
         <module>proxy-plugin</module>
         <module>backend-agent</module>

@@ -37,6 +37,8 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSp
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateAttributes;
 import io.netty.buffer.ByteBuf;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -308,6 +310,9 @@ public final class EntityIdRemapper implements PacketListener {
         purgeStaleScoreboard(user, state);
         purgeStaleEntities(user, state);
         String payload = new String(w.getData(), StandardCharsets.UTF_8);
+        if (!verifyIdsHmac(payload, state)) {
+            return;
+        }
         String[] parts = payload.split(":");
         if (parts.length < 2) {
             logger.warn("[InstantTransfer] bad ids payload: {}", payload);
@@ -325,6 +330,46 @@ public final class EntityIdRemapper implements PacketListener {
                 user.getName(), clientId, backendId,
                 parts.length >= 3 ? parts[2] : "?",
                 clientId == backendId ? "identical, remap idle" : "swap active");
+    }
+
+    /** Verify HMAC-SHA256 signature on the instanttransfer:ids payload.
+     *  Expected format: clientId:backendId[:gamemode]:hmacHex
+     *  The hmacHex is HMAC-SHA256 of the prefix (clientId:backendId[:gamemode]) using the
+     *  shared secret configured in PluginConfig.idsHmacSecret.
+     *  Returns true if the HMAC matches, or if no secret is configured (backward compatibility). */
+    private boolean verifyIdsHmac(String payload, SwitchState state) {
+        if (config.idsHmacSecret() == null || config.idsHmacSecret().isEmpty()) {
+            return true; // no secret configured → allow for backward compatibility
+        }
+        int lastColon = payload.lastIndexOf(':');
+        if (lastColon < 1) {
+            return false;
+        }
+        String signingPayload = payload.substring(0, lastColon);
+        String receivedHmac = payload.substring(lastColon + 1);
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec keySpec = new SecretKeySpec(
+                    config.idsHmacSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(keySpec);
+            byte[] computed = mac.doFinal(signingPayload.getBytes(StandardCharsets.UTF_8));
+            String computedHex = bytesToHex(computed);
+            return computedHex.equals(receivedHmac);
+        } catch (Exception e) {
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] HMAC verification error: {}", e.toString());
+            }
+            return false;
+        }
+    }
+
+    /** Convert byte array to uppercase hex string. */
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     /**
