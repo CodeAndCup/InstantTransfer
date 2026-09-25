@@ -21,6 +21,8 @@ import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -80,7 +82,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
         return msg;
     }
 
-    private static boolean verifyCoordHmac(String msg, String secret) {
+    private boolean verifyCoordHmac(String msg, String secret) {
         if (secret == null || secret.isEmpty()) {
             getLogger().warning("[COORD] HMAC verification skipped: secret not configured");
             return false; // require secret
@@ -96,7 +98,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
             String computedHex = bytesToHex(computed);
             return MessageDigest.isEqual(computedHex.getBytes(StandardCharsets.UTF_8), receivedHmac.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            getLogger().warning("[COORD] HMAC verification error: {}", e.toString());
+            getLogger().warning("[COORD] HMAC verification error: " + e.toString());
             return false;
         }
     }
@@ -119,7 +121,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
         // messages without valid HMAC are ignored to prevent spoofing.
         if (!verifyCoordHmac(msg, ConfigValue.getCoordHmacSecret())) {
             if (ConfigValue.isDebug()) {
-                getLogger().warning("[COORD] invalid HMAC on coord message from {}: {}", player.getName(), msg);
+                getLogger().warning("[COORD] invalid HMAC on coord message from " + player.getName() + ": " + msg);
             }
             return;
         }
