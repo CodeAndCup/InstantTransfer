@@ -83,8 +83,8 @@ public final class PluginConfig {
             Files.createDirectories(dataDirectory);
             Path file = dataDirectory.resolve("config.properties");
             Properties props = new Properties();
-            if (Files.exists(file)) {
-                try (InputStream in = Files.newInputStream(file)) {
+            if (Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                try (InputStream in = Files.newInputStream(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                     props.load(in);
                 }
                 config.seamlessEnabled = parseBool(props, "seamless-enabled", config.seamlessEnabled);
@@ -103,8 +103,10 @@ public final class PluginConfig {
                 props.setProperty("require-same-dimension", Boolean.toString(config.requireSameDimension));
                 props.setProperty("debug", Boolean.toString(config.debug));
                 props.setProperty("guard-timeout-ms", Integer.toString(config.guardTimeoutMs));
-                try (OutputStream out = Files.newOutputStream(file)) {
+                try (OutputStream out = Files.newOutputStream(file, java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE)) {
                     props.store(out, "InstantTransfer configuration");
+                } catch (java.nio.file.FileAlreadyExistsException e) {
+                    logger.warn("[InstantTransfer] Config file exists as non-regular file, using defaults", e);
                 }
                 logger.info("[InstantTransfer] Wrote default config to {}", file);
             }

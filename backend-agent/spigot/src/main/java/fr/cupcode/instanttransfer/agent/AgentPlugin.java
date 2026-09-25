@@ -18,6 +18,7 @@ import org.bukkit.plugin.messaging.PluginMessageListener;
 
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Set;
@@ -81,7 +82,8 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
     private static boolean verifyCoordHmac(String msg, String secret) {
         if (secret == null || secret.isEmpty()) {
-            return true; // no secret configured → allow for backward compatibility
+            getLogger().warning("[COORD] HMAC verification skipped: secret not configured");
+            return false; // require secret
         }
         String payload = getHmacPayload(msg);
         String receivedHmac = getReceivedHmac(msg);
@@ -92,7 +94,7 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
             mac.init(keySpec);
             byte[] computed = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
             String computedHex = bytesToHex(computed);
-            return computedHex.equals(receivedHmac);
+            return MessageDigest.isEqual(computedHex.getBytes(StandardCharsets.UTF_8), receivedHmac.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             getLogger().warning("[COORD] HMAC verification error: {}", e.toString());
             return false;

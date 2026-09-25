@@ -42,6 +42,7 @@ import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Optional;
 import java.util.EnumSet;
 
@@ -339,7 +340,10 @@ public final class EntityIdRemapper implements PacketListener {
      *  Returns true if the HMAC matches, or if no secret is configured (backward compatibility). */
     private boolean verifyIdsHmac(String payload, SwitchState state) {
         if (config.idsHmacSecret() == null || config.idsHmacSecret().isEmpty()) {
-            return true; // no secret configured → allow for backward compatibility
+            if (config.debug()) {
+                logger.warn("[InstantTransfer] ids HMAC verification skipped: secret not configured");
+            }
+            return false; // require secret
         }
         int lastColon = payload.lastIndexOf(':');
         if (lastColon < 1) {
@@ -354,7 +358,7 @@ public final class EntityIdRemapper implements PacketListener {
             mac.init(keySpec);
             byte[] computed = mac.doFinal(signingPayload.getBytes(StandardCharsets.UTF_8));
             String computedHex = bytesToHex(computed);
-            return computedHex.equals(receivedHmac);
+            return MessageDigest.isEqual(computedHex.getBytes(StandardCharsets.UTF_8), receivedHmac.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             if (config.debug()) {
                 logger.warn("[InstantTransfer] HMAC verification error: {}", e.toString());

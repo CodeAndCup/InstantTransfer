@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -57,7 +58,8 @@ public final class CoordManager {
 
     private boolean verifyHmac(String payload, String receivedHmac, String secret) {
         if (secret == null || secret.isEmpty()) {
-            return true; // no secret configured → allow for backward compatibility
+            logger.warn("[COORD] HMAC verification skipped: secret not configured");
+            return false; // require secret
         }
         int lastColon = payload.lastIndexOf(':');
         if (lastColon < 1) {
@@ -68,7 +70,7 @@ public final class CoordManager {
         if (computedHmac == null) {
             return false;
         }
-        return computedHmac.equals(receivedHmac);
+        return MessageDigest.isEqual(computedHmac.getBytes(StandardCharsets.UTF_8), receivedHmac != null ? receivedHmac.getBytes(StandardCharsets.UTF_8) : new byte[0]);
     }
 
     @Subscribe
