@@ -1,0 +1,9 @@
+# InstantTransferAgent default configuration.
+# Copy is created automatically on first enable via saveDefaultConfig().
+debug: false
+
+# Shared secret for instanttransfer:coord HMAC-SHA256 authentication.
+# MUST be identical on the Velocity proxy and every backend agent.
+# When empty (default) the coord channel stays unauthenticated for backward
+# compatibility but logs a startup warning. Set a long random value in production.
+coord-hmac-secret: ""
