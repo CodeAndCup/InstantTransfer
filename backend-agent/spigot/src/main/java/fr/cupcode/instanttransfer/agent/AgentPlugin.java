@@ -21,12 +21,12 @@ import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Backend agent for coordinated seamless-transfer system.
@@ -38,8 +38,14 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();
         ConfigValue.setDebug(getConfig().getBoolean("debug", false));
-        getLogger().info("InstantTransferAgent enabled (coord channel '" + COORD_CHANNEL + "', arrival fall/flight guard, debug=" + ConfigValue.isDebug() + ").");
+        String secret = getConfig().getString("coord-hmac-secret", "");
+        ConfigValue.setCoordHmacSecret(secret != null ? secret.trim() : "");
+        if (ConfigValue.getCoordHmacSecret().isEmpty()) {
+            getLogger().warning("[COORD] coord-hmac-secret is UNSET: coord channel accepts unauthenticated messages (legacy mode). Set the same secret on proxy and all backends.");
+        }
+        getLogger().info("InstantTransferAgent enabled (coord channel '" + COORD_CHANNEL + "', arrival fall/flight guard, debug=" + ConfigValue.isDebug() + ", coord-hmac-secret=" + (ConfigValue.getCoordHmacSecret().isEmpty() ? "unset" : "set") + ").");
 
         getServer().getMessenger().registerOutgoingPluginChannel(this, COORD_CHANNEL);
         getServer().getMessenger().registerIncomingPluginChannel(this, COORD_CHANNEL, this);
@@ -74,7 +80,6 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
     private static String extractInnerMsg(String msg) {
         // The HMAC signature is always the last colon-delimited segment if present.
-        // Returns the message without the HMAC suffix for legacy compatibility.
         int lastColon = msg.lastIndexOf(':');
         if (lastColon >= 0 && lastColon < msg.length() - 1) {
             return msg.substring(0, lastColon);
@@ -84,21 +89,22 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
     private boolean verifyCoordHmac(String msg, String secret) {
         if (secret == null || secret.isEmpty()) {
-            getLogger().warning("[COORD] HMAC verification skipped: secret not configured");
-            return false; // require secret
+            return true; // no secret configured -> allow for backward compatibility
         }
         String payload = getHmacPayload(msg);
         String receivedHmac = getReceivedHmac(msg);
-        if (receivedHmac == null) return false;
+        if (receivedHmac == null || receivedHmac.isEmpty()) return false;
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             SecretKeySpec keySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             mac.init(keySpec);
             byte[] computed = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
             String computedHex = bytesToHex(computed);
-            return MessageDigest.isEqual(computedHex.getBytes(StandardCharsets.UTF_8), receivedHmac.getBytes(StandardCharsets.UTF_8));
+            return MessageDigest.isEqual(
+                    computedHex.getBytes(StandardCharsets.UTF_8),
+                    receivedHmac.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            getLogger().warning("[COORD] HMAC verification error: " + e.toString());
+            getLogger().warning("[COORD] HMAC verification error: " + e);
             return false;
         }
     }
@@ -119,14 +125,16 @@ public final class AgentPlugin extends JavaPlugin implements PluginMessageListen
 
         // Verify HMAC if a coordination secret is configured;
         // messages without valid HMAC are ignored to prevent spoofing.
-        if (!verifyCoordHmac(msg, ConfigValue.getCoordHmacSecret())) {
-            if (ConfigValue.isDebug()) {
-                getLogger().warning("[COORD] invalid HMAC on coord message from " + player.getName() + ": " + msg);
-            }
+        String secret = ConfigValue.getCoordHmacSecret();
+        boolean secured = secret != null && !secret.isEmpty();
+        if (!verifyCoordHmac(msg, secret)) {
+            getLogger().warning("[COORD] invalid HMAC on coord message from " + player.getName() + ": " + msg);
             return;
         }
 
-        String innerMsg = extractInnerMsg(msg);
+        // Only strip the HMAC suffix when a secret is configured; otherwise
+        // keep the legacy payload untouched (unfreeze:uuid / arrival:uuid:server).
+        String innerMsg = secured ? extractInnerMsg(msg) : msg;
 
         if (innerMsg.startsWith("unfreeze:")) {
             try {

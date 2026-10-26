@@ -56,58 +56,70 @@ public final class CoordManager {
         return sb.toString();
     }
 
-    private boolean verifyHmac(String payload, String receivedHmac, String secret) {
+    private static String getHmacPayload(String msg) {
+        int lastColon = msg.lastIndexOf(':');
+        if (lastColon < 1) return msg;
+        return msg.substring(0, lastColon);
+    }
+
+    private static String getReceivedHmac(String msg) {
+        int lastColon = msg.lastIndexOf(':');
+        if (lastColon < 1) return null;
+        return msg.substring(lastColon + 1);
+    }
+
+    private boolean verifyHmac(String msg, String secret) {
         if (secret == null || secret.isEmpty()) {
-            logger.warn("[COORD] HMAC verification skipped: secret not configured");
-            return false; // require secret
+            return true;
         }
-        int lastColon = payload.lastIndexOf(':');
-        if (lastColon < 1) {
+        String receivedHmac = getReceivedHmac(msg);
+        if (receivedHmac == null || receivedHmac.isEmpty()) {
             return false;
         }
-        String signingPayload = payload.substring(0, lastColon);
+        String signingPayload = getHmacPayload(msg);
         String computedHmac = signHmac(signingPayload, secret);
         if (computedHmac == null) {
             return false;
         }
-        return MessageDigest.isEqual(computedHmac.getBytes(StandardCharsets.UTF_8), receivedHmac != null ? receivedHmac.getBytes(StandardCharsets.UTF_8) : new byte[0]);
+        return MessageDigest.isEqual(
+                computedHmac.getBytes(StandardCharsets.UTF_8),
+                receivedHmac.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean isSecured(String secret) {
+        return secret != null && !secret.isEmpty();
     }
 
     @Subscribe
     public void onPostConnect(ServerPostConnectEvent event) {
         Player player = event.getPlayer();
         player.getCurrentServer().ifPresent(server -> {
-            String payload = "seamless-ping:" + player.getUsername()
+            String base = "seamless-ping:" + player.getUsername()
                     + ":" + server.getServerInfo().getName();
+            String hmac = signHmac(base, coordHmacSecret);
+            String payload = (hmac == null) ? base : base + ":" + hmac;
             server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
             logger.info("[COORD] sent ping to {} for {}",
                     server.getServerInfo().getName(), player.getUsername());
         });
     }
 
-    /**
-     * Tell the player's current backend that the arrival freeze is over, so the agent can restore
-     * the real flight permission immediately (instead of waiting out its safety-timer grace).
-     */
     public void sendUnfreeze(UUID uuid) {
         proxy.getPlayer(uuid).flatMap(Player::getCurrentServer).ifPresent(server -> {
-            String payload = "unfreeze:" + uuid + ":" + signHmac("unfreeze:" + uuid, coordHmacSecret);
+            String base = "unfreeze:" + uuid;
+            String hmac = signHmac(base, coordHmacSecret);
+            String payload = (hmac == null) ? base : base + ":" + hmac;
             server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
             logger.info("[COORD] sent unfreeze to {} for {}",
                     server.getServerInfo().getName(), uuid);
         });
     }
 
-    /**
-     * Notify the backend that a player has arrived via instant transfer.
-     * This triggers the backend agent to grant arrival flight and fire arrival events.
-     *
-     * @param uuid the player's UUID
-     * @param fromServer the server the player came from
-     */
     public void sendArrival(UUID uuid, String fromServer) {
         proxy.getPlayer(uuid).flatMap(Player::getCurrentServer).ifPresent(server -> {
-            String payload = "arrival:" + uuid + ":" + fromServer + ":" + signHmac("arrival:" + uuid + ":" + fromServer, coordHmacSecret);
+            String base = "arrival:" + uuid + ":" + fromServer;
+            String hmac = signHmac(base, coordHmacSecret);
+            String payload = (hmac == null) ? base : base + ":" + hmac;
             server.sendPluginMessage(COORD, payload.getBytes(StandardCharsets.UTF_8));
             logger.info("[COORD] sent arrival to {} for {} (from {})",
                     server.getServerInfo().getName(), uuid, fromServer);
@@ -119,19 +131,19 @@ public final class CoordManager {
         if (!event.getIdentifier().equals(COORD)) {
             return;
         }
-        // Our channel: don't forward it to the client.
         event.setResult(PluginMessageEvent.ForwardResult.handled());
         if (event.getSource() instanceof ServerConnection server) {
             String msg = new String(event.getData(), StandardCharsets.UTF_8);
-            // Verify HMAC if a signature is appended (last segment after final colon)
-            if (!verifyHmac(msg, null, coordHmacSecret)) {
+            if (!verifyHmac(msg, coordHmacSecret)) {
                 logger.warn("[COORD] invalid HMAC on coord message from {}: {}", server.getServerInfo().getName(), msg);
                 return;
             }
-            // Extract inner message without HMAC suffix for legacy compatibility
-            // The HMAC signature is always the last colon-delimited segment
-            int lastColon = msg.lastIndexOf(':');
-            String innerMsg = (lastColon >= 0) ? msg.substring(0, lastColon) : msg;
+            // Only strip the HMAC suffix when secured; in legacy mode keep msg as-is.
+            String innerMsg = msg;
+            if (isSecured(coordHmacSecret)) {
+                int lastColon = msg.lastIndexOf(':');
+                innerMsg = (lastColon >= 0) ? msg.substring(0, lastColon) : msg;
+            }
             logger.info("[COORD] recv from {}: {}", server.getServerInfo().getName(), innerMsg);
         }
     }

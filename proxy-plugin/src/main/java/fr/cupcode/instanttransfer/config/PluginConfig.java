@@ -38,7 +38,8 @@ public final class PluginConfig {
      * When set, the EntityIdRemapper will verify the HMAC-SHA256 of the payload portion
      * (clientId:backendId[:gamemode]) against this hex-encoded secret.
      * If the HMAC does not match, the IDs message is ignored and logged as suspicious.
-     * Set a secret on both the proxy and the patched Velocity to authenticate IDs messages.
+     * NOTE: the Velocity patch (velocity-patch/seamless.patch) currently sends ids
+     * unsigned, so this must stay empty until the patch signs its payload.
      */
     private String idsHmacSecret = "";
 
@@ -103,6 +104,8 @@ public final class PluginConfig {
                 props.setProperty("require-same-dimension", Boolean.toString(config.requireSameDimension));
                 props.setProperty("debug", Boolean.toString(config.debug));
                 props.setProperty("guard-timeout-ms", Integer.toString(config.guardTimeoutMs));
+                props.setProperty("ids-hmac-secret", config.idsHmacSecret);
+                props.setProperty("coord-hmac-secret", config.coordHmacSecret);
                 try (OutputStream out = Files.newOutputStream(file, java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE)) {
                     props.store(out, "InstantTransfer configuration");
                 } catch (java.nio.file.FileAlreadyExistsException e) {
@@ -112,6 +115,12 @@ public final class PluginConfig {
             }
         } catch (IOException e) {
             logger.warn("[InstantTransfer] Could not read/write config, using defaults", e);
+        }
+        if (config.coordHmacSecret == null || config.coordHmacSecret.isEmpty()) {
+            logger.warn("[InstantTransfer] coord-hmac-secret is UNSET: coord channel accepts unauthenticated messages (legacy mode). Set the same secret on proxy and all backends.");
+        }
+        if (config.idsHmacSecret == null || config.idsHmacSecret.isEmpty()) {
+            logger.warn("[InstantTransfer] ids-hmac-secret is UNSET: ids channel accepts unauthenticated messages (legacy mode). Keep empty until the Velocity patch signs its payload.");
         }
         return config;
     }

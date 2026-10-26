@@ -314,18 +314,37 @@ public final class EntityIdRemapper implements PacketListener {
         if (!verifyIdsHmac(payload, state)) {
             return;
         }
-        String[] parts = payload.split(":");
+        // When a secret is configured the last segment is the HMAC: parse the signing payload.
+        // NOTE: the Velocity patch (velocity-patch/seamless.patch) currently sends ids unsigned,
+        // so ids-hmac-secret must stay empty until the patch signs its payload.
+        String signingPayload = payload;
+        String idsSecret = config.idsHmacSecret();
+        if (idsSecret != null && !idsSecret.isEmpty()) {
+            int lastColon = payload.lastIndexOf(':');
+            if (lastColon < 1) {
+                return;
+            }
+            signingPayload = payload.substring(0, lastColon);
+        }
+        String[] parts = signingPayload.split(":");
         if (parts.length < 2) {
             logger.warn("[InstantTransfer] bad ids payload: {}", payload);
             return;
         }
-        int clientId = Integer.parseInt(parts[0]);
-        int backendId = Integer.parseInt(parts[1]);
-        state.entityIds(clientId, backendId);
-        if (parts.length >= 3) {
-            // The new backend's gamemode: applied on arrival (release), since the client no longer
-            // learns it from JoinGame/Respawn.
-            state.pendingGamemode(Integer.parseInt(parts[2]));
+        int clientId;
+        int backendId;
+        try {
+            clientId = Integer.parseInt(parts[0]);
+            backendId = Integer.parseInt(parts[1]);
+            state.entityIds(clientId, backendId);
+            if (parts.length >= 3) {
+                // The new backend's gamemode: applied on arrival (release), since the client no longer
+                // learns it from JoinGame/Respawn.
+                state.pendingGamemode(Integer.parseInt(parts[2]));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("[InstantTransfer] bad ids payload: {}", payload);
+            return;
         }
         logger.info("[InstantTransfer] entity-id remap for {}: client={} backend={} gamemode={} ({})",
                 user.getName(), clientId, backendId,
@@ -340,10 +359,7 @@ public final class EntityIdRemapper implements PacketListener {
      *  Returns true if the HMAC matches, or if no secret is configured (backward compatibility). */
     private boolean verifyIdsHmac(String payload, SwitchState state) {
         if (config.idsHmacSecret() == null || config.idsHmacSecret().isEmpty()) {
-            if (config.debug()) {
-                logger.warn("[InstantTransfer] ids HMAC verification skipped: secret not configured");
-            }
-            return false; // require secret
+            return true; // no secret configured → allow for backward compatibility
         }
         int lastColon = payload.lastIndexOf(':');
         if (lastColon < 1) {
